@@ -1,0 +1,5 @@
+name: ProfileCommand
+version: 1.0
+main: com.yourserver.profilecommand.ProfileCommandPlugin
+api-version: "1.21"
+depend: [DiscordSRV, PlaceholderAPI]
