@@ -13,11 +13,6 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Download and install DiscordSRV locally
-        run: |
-          wget -q https://github.com/DiscordSRV/DiscordSRV/releases/download/v1.30.4/DiscordSRV.jar
-          mvn install:install-file -Dfile=DiscordSRV.jar -DgroupId=com.discordsrv -DartifactId=discordsrv -Dversion=1.30.4 -Dpackaging=jar
-
       - name: Build with Maven
         run: mvn clean package -DskipTests
 
