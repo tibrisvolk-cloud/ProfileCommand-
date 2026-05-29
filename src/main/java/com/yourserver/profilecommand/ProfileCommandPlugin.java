@@ -1,24 +1,26 @@
 package com.yourserver.profilecommand;
 
+import github.scarsz.discordsrv.DiscordSRV;
 import me.clip.placeholderapi.PlaceholderAPI;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.awt.Color;
-import java.lang.reflect.Method;
 
 public class ProfileCommandPlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
         try {
-            Object jda = getJDAFromDiscordSRV();
+            // Получаем JDA напрямую через API DiscordSRV
+            Object jda = DiscordSRV.getPlugin().getJda();
             if (jda == null) {
-                getLogger().severe("Не удалось получить JDA от DiscordSRV. Плагин не будет работать.");
+                getLogger().severe("JDA от DiscordSRV не получен. Плагин не будет работать.");
                 return;
             }
 
+            // Регистрируем слушатель
             jda.getClass().getMethod("addEventListener", Object[].class)
                     .invoke(jda, new Object[]{new ProfileCommandListener()});
 
@@ -26,19 +28,6 @@ public class ProfileCommandPlugin extends JavaPlugin {
         } catch (Exception e) {
             getLogger().severe("Ошибка при инициализации: " + e.getMessage());
             e.printStackTrace();
-        }
-    }
-
-    private Object getJDAFromDiscordSRV() {
-        try {
-            Class<?> discordsrvClass = Class.forName("github.scarsz.discordsrv.DiscordSRV");
-            Object api = discordsrvClass.getField("api").get(null);
-            if (api == null) throw new RuntimeException("DiscordSRV API is null");
-            Method getJdaMethod = api.getClass().getMethod("getJda");
-            return getJdaMethod.invoke(api);
-        } catch (Exception e) {
-            getLogger().severe("DiscordSRV не найден или не удалось получить JDA.");
-            return null;
         }
     }
 
@@ -126,5 +115,7 @@ public class ProfileCommandPlugin extends JavaPlugin {
                 e.printStackTrace();
             }
         }
+    }
+}
     }
 }
