@@ -32,10 +32,10 @@ public class ProfileCommandPlugin extends JavaPlugin {
     private Object getJDAFromDiscordSRV() {
         try {
             Class<?> discordsrvClass = Class.forName("github.scarsz.discordsrv.DiscordSRV");
-            Method getPluginMethod = discordsrvClass.getMethod("getPlugin");
-            Object plugin = getPluginMethod.invoke(null);
-            Method getJdaMethod = plugin.getClass().getMethod("getJda");
-            return getJdaMethod.invoke(plugin);
+            Object api = discordsrvClass.getField("api").get(null);
+            if (api == null) throw new RuntimeException("DiscordSRV API is null");
+            Method getJdaMethod = api.getClass().getMethod("getJda");
+            return getJdaMethod.invoke(api);
         } catch (Exception e) {
             getLogger().severe("DiscordSRV не найден или не удалось получить JDA.");
             return null;
@@ -54,7 +54,6 @@ public class ProfileCommandPlugin extends JavaPlugin {
                 String content = (String) message.getClass().getMethod("getContentRaw").invoke(message);
                 String lowerContent = content.toLowerCase();
 
-                // Проверяем, начинается ли сообщение с одной из команд и содержит ли пробел с ником
                 String[] prefixes = {"!profile ", "!p ", "!stats ", "!myprofile "};
                 String targetName = null;
 
@@ -66,7 +65,6 @@ public class ProfileCommandPlugin extends JavaPlugin {
                 }
 
                 if (targetName == null || targetName.isEmpty()) {
-                    // Если команда без аргументов — подсказываем
                     if (content.equalsIgnoreCase("!profile") || content.equalsIgnoreCase("!p") ||
                         content.equalsIgnoreCase("!stats") || content.equalsIgnoreCase("!myprofile")) {
                         sendMessage(event, "ℹ️ Используйте: `!profile <ник>` (например, `!profile Stev_Play`)");
