@@ -1,65 +1,131 @@
 package com.yourserver.profilecommand;
 
-import github.scarsz.discordsrv.DiscordSRV;
-import github.scarsz.discordsrv.dependencies.jda.api.EmbedBuilder;
-import github.scarsz.discordsrv.dependencies.jda.api.events.message.guild.GuildMessageReceivedEvent;
-import github.scarsz.discordsrv.dependencies.jda.api.hooks.ListenerAdapter;
 import me.clip.placeholderapi.PlaceholderAPI;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import javax.annotation.Nonnull;
-import java.awt.*;
-import java.util.UUID;
+import java.awt.Color;
+import java.lang.reflect.Method;
 
 public class ProfileCommandPlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
-        DiscordSRV.api.getJda().addEventListener(new ProfileCommandListener());
-        getLogger().info("ProfileCommand успешно активирован. Команда !profile готова!");
+        try {
+            Object jda = getJDAFromDiscordSRV();
+            if (jda == null) {
+                getLogger().severe("Не удалось получить JDA от DiscordSRV. Плагин не будет работать.");
+                return;
+            }
+
+            jda.getClass().getMethod("addEventListener", Object[].class)
+                    .invoke(jda, new Object[]{new ProfileCommandListener()});
+
+            getLogger().info("ProfileCommand успешно активирован. Команда !profile <ник> готова!");
+        } catch (Exception e) {
+            getLogger().severe("Ошибка при инициализации: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
-    private static class ProfileCommandListener extends ListenerAdapter {
-        @Override
-        public void onGuildMessageReceived(@Nonnull GuildMessageReceivedEvent event) {
-            if (event.getAuthor().isBot()) return;
+    private Object getJDAFromDiscordSRV() {
+        try {
+            Class<?> discordsrvClass = Class.forName("github.scarsz.discordsrv.DiscordSRV");
+            Method getPluginMethod = discordsrvClass.getMethod("getPlugin");
+            Object plugin = getPluginMethod.invoke(null);
+            Method getJdaMethod = plugin.getClass().getMethod("getJda");
+            return getJdaMethod.invoke(plugin);
+        } catch (Exception e) {
+            getLogger().severe("DiscordSRV не найден или не удалось получить JDA.");
+            return null;
+        }
+    }
 
-            String message = event.getMessage().getContentRaw();
-            if (message.equalsIgnoreCase("!profile") ||
-                message.equalsIgnoreCase("!p") ||
-                message.equalsIgnoreCase("!stats") ||
-                message.equalsIgnoreCase("!myprofile")) {
+    public static class ProfileCommandListener {
 
-                String discordId = event.getAuthor().getId();
-                UUID playerUuid = DiscordSRV.getPlugin().getAccountLinkManager().getUuid(discordId);
-                if (playerUuid == null) {
-                    event.getChannel().sendMessage("❌ Ваш Discord не привязан к аккаунту Minecraft. Привяжите его на сервере.").queue();
+        public void onGuildMessageReceived(Object event) {
+            try {
+                Object message = event.getClass().getMethod("getMessage").invoke(event);
+                Object author = message.getClass().getMethod("getAuthor").invoke(message);
+
+                if ((boolean) author.getClass().getMethod("isBot").invoke(author)) return;
+
+                String content = (String) message.getClass().getMethod("getContentRaw").invoke(message);
+                String lowerContent = content.toLowerCase();
+
+                // Проверяем, начинается ли сообщение с одной из команд и содержит ли пробел с ником
+                String[] prefixes = {"!profile ", "!p ", "!stats ", "!myprofile "};
+                String targetName = null;
+
+                for (String prefix : prefixes) {
+                    if (lowerContent.startsWith(prefix)) {
+                        targetName = content.substring(prefix.length()).trim();
+                        break;
+                    }
+                }
+
+                if (targetName == null || targetName.isEmpty()) {
+                    // Если команда без аргументов — подсказываем
+                    if (content.equalsIgnoreCase("!profile") || content.equalsIgnoreCase("!p") ||
+                        content.equalsIgnoreCase("!stats") || content.equalsIgnoreCase("!myprofile")) {
+                        sendMessage(event, "ℹ️ Используйте: `!profile <ник>` (например, `!profile Stev_Play`)");
+                    }
                     return;
                 }
 
-                OfflinePlayer player = Bukkit.getOfflinePlayer(playerUuid);
-                if (player.getName() == null) {
-                    event.getChannel().sendMessage("❌ Не удалось найти игрока с таким UUID.").queue();
+                OfflinePlayer target = Bukkit.getOfflinePlayer(targetName);
+                if (target.getName() == null) {
+                    sendMessage(event, "❌ Игрок с ником `" + targetName + "` не найден.");
                     return;
                 }
 
-                String name = player.getName();
-                String timePlayed = PlaceholderAPI.setPlaceholders(player, "%statistic_time_played%");
-                String mobKills = PlaceholderAPI.setPlaceholders(player, "%statistic_mob_kills%");
-                String blocksMined = PlaceholderAPI.setPlaceholders(player, "%statistic_mine_block%");
+                String timePlayed = PlaceholderAPI.setPlaceholders(target, "%statistic_time_played%");
+                String mobKills = PlaceholderAPI.setPlaceholders(target, "%statistic_mob_kills%");
+                String blocksMined = PlaceholderAPI.setPlaceholders(target, "%statistic_mine_block%");
 
-                EmbedBuilder embed = new EmbedBuilder();
-                embed.setColor(new Color(0x5865F2)); // синий Discord
-                embed.setAuthor(name, null, "https://minotar.net/avatar/" + name + "/128");
-                embed.setThumbnail("https://minotar.net/avatar/" + name + "/128");
-                embed.addField(":clock1: Наиграно", timePlayed, true);
-                embed.addField(":sword: Убито мобов", mobKills, true);
-                embed.addField(":pick: Добыто блоков", blocksMined, true);
-                embed.setFooter("Запрошено через Discord бота");
+                sendEmbed(event, target.getName(), timePlayed, mobKills, blocksMined);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
 
-                event.getChannel().sendMessageEmbeds(embed.build()).queue();
+        private void sendMessage(Object event, String text) {
+            try {
+                Object channel = event.getClass().getMethod("getChannel").invoke(event);
+                channel.getClass().getMethod("sendMessage", CharSequence.class).invoke(channel, text);
+            } catch (Exception ignored) {}
+        }
+
+        private void sendEmbed(Object event, String playerName, String time, String kills, String blocks) {
+            try {
+                Object channel = event.getClass().getMethod("getChannel").invoke(event);
+
+                Class<?> embedBuilderClass = Class.forName("net.dv8tion.jda.api.EmbedBuilder");
+                Object embedBuilder = embedBuilderClass.getDeclaredConstructor().newInstance();
+
+                Class<?> colorClass = Class.forName("java.awt.Color");
+                Object blurple = colorClass.getDeclaredConstructor(int.class).newInstance(0x5865F2);
+                embedBuilderClass.getMethod("setColor", colorClass).invoke(embedBuilder, blurple);
+
+                String avatarUrl = "https://minotar.net/avatar/" + playerName + "/128";
+                embedBuilderClass.getMethod("setAuthor", String.class, String.class, String.class)
+                        .invoke(embedBuilder, playerName, null, avatarUrl);
+                embedBuilderClass.getMethod("setThumbnail", String.class).invoke(embedBuilder, avatarUrl);
+
+                embedBuilderClass.getMethod("addField", String.class, String.class, boolean.class)
+                        .invoke(embedBuilder, ":clock1: Наиграно", time, true);
+                embedBuilderClass.getMethod("addField", String.class, String.class, boolean.class)
+                        .invoke(embedBuilder, ":sword: Убито мобов", kills, true);
+                embedBuilderClass.getMethod("addField", String.class, String.class, boolean.class)
+                        .invoke(embedBuilder, ":pick: Добыто блоков", blocks, true);
+
+                embedBuilderClass.getMethod("setFooter", String.class).invoke(embedBuilder, "Запрошено через Discord бота");
+
+                Object embed = embedBuilderClass.getMethod("build").invoke(embedBuilder);
+                channel.getClass().getMethod("sendMessageEmbeds", embed.getClass()).invoke(channel, embed);
+            } catch (Exception e) {
+                e.printStackTrace();
             }
         }
     }
