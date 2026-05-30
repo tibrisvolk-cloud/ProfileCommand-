@@ -5,6 +5,7 @@ import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.*;
+import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -254,7 +255,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     // ==================== Рекорды ====================
     private void updateRecordsMessage() {
         if (recordsChannelId.isEmpty()) return;
-        TextChannel channel = jda.getTextChannelById(recordsChannelId);
+        GuildMessageChannel channel = jda.getChannelById(GuildMessageChannel.class, recordsChannelId);
         if (channel == null) {
             getLogger().warning("Канал рекордов не найден: " + recordsChannelId);
             return;
