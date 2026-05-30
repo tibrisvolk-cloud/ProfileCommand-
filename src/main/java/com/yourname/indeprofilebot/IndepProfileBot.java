@@ -28,8 +28,6 @@ public class IndepProfileBot extends JavaPlugin {
     private List<Map<?, ?>> profileFields;
     private Map<String, TopCategory> topCategories;
     private int topPageSize;
-
-    // Хранилище состояний топов (ключ: ID сообщения)
     private final Map<String, TopState> topStates = new ConcurrentHashMap<>();
 
     @Override
@@ -38,7 +36,6 @@ public class IndepProfileBot extends JavaPlugin {
         reloadConfig();
         profileFields = getConfig().getMapList("profile-fields");
 
-        // Загружаем категории топа
         topCategories = new LinkedHashMap<>();
         for (String key : getConfig().getConfigurationSection("top-categories").getKeys(false)) {
             String label = getConfig().getString("top-categories." + key + ".label");
@@ -70,12 +67,10 @@ public class IndepProfileBot extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        if (jda != null) {
-            jda.shutdown();
-        }
+        if (jda != null) jda.shutdown();
     }
 
-    // ========== Вспомогательные методы (как раньше) ==========
+    // ========== Общие хелперы ==========
     public String getFieldValue(OfflinePlayer player, String placeholder) {
         switch (placeholder) {
             case "_blank_": return "\u200B";
@@ -122,7 +117,7 @@ public class IndepProfileBot extends JavaPlugin {
         }
     }
 
-    // ========== Топ-листы ==========
+    // ========== Топ ==========
     private List<Map.Entry<String, Long>> getTopForCategory(String placeholder) {
         Map<String, Long> scores = new HashMap<>();
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
@@ -165,19 +160,13 @@ public class IndepProfileBot extends JavaPlugin {
         List<Button> catButtons = new ArrayList<>();
         for (Map.Entry<String, TopCategory> entry : topCategories.entrySet()) {
             String key = entry.getKey();
-            Button btn = Button.secondary("top_cat_" + key, entry.getValue().label)
-                    .withDisabled(key.equals(currentCategory));
-            catButtons.add(btn);
+            catButtons.add(Button.secondary("top_cat_" + key, entry.getValue().label)
+                    .withDisabled(key.equals(currentCategory)));
         }
-
         Button prevBtn = Button.secondary("top_page_" + currentCategory + "_" + (currentPage - 1), "◀️ Назад")
                 .withDisabled(currentPage <= 0);
         Button nextBtn = Button.secondary("top_page_" + currentCategory + "_" + (currentPage + 1), "Вперед ▶️");
-
-        return List.of(
-                ActionRow.of(catButtons),
-                ActionRow.of(prevBtn, nextBtn)
-        );
+        return List.of(ActionRow.of(catButtons), ActionRow.of(prevBtn, nextBtn));
     }
 
     // ========== Слушатели ==========
@@ -197,15 +186,47 @@ public class IndepProfileBot extends JavaPlugin {
                 MessageEmbed embed = plugin.buildTopEmbed(defaultCategory, 0);
                 event.getChannel().sendMessageEmbeds(embed)
                         .setComponents(plugin.buildTopButtons(defaultCategory, 0))
-                        .queue(message -> {
-                            // Сохраняем состояние
-                            plugin.topStates.put(message.getId(), new TopState(defaultCategory, 0));
-                        });
+                        .queue(message -> plugin.topStates.put(message.getId(), new TopState(defaultCategory, 0)));
                 return;
             }
 
             // !profile (как раньше)
-            // ... (весь существующий код !profile оставляем) ...
+            String[] prefixes = {"!profile ", "!p ", "!stats ", "!myprofile "};
+            String targetName = null;
+            for (String prefix : prefixes) {
+                if (lower.startsWith(prefix)) {
+                    targetName = content.substring(prefix.length()).trim();
+                    break;
+                }
+            }
+            if (targetName == null || targetName.isEmpty()) {
+                if (lower.equals("!profile") || lower.equals("!p") || lower.equals("!stats") || lower.equals("!myprofile")) {
+                    event.getMessage().reply("ℹ️ Используйте: `!profile <ник>` (например, `!profile Stev_Play`)").queue();
+                }
+                return;
+            }
+
+            OfflinePlayer target = Bukkit.getOfflinePlayer(targetName);
+            if (target.getName() == null) {
+                event.getMessage().reply("❌ Игрок с ником `" + targetName + "` не найден.").queue();
+                return;
+            }
+
+            EmbedBuilder embed = new EmbedBuilder();
+            embed.setColor(new Color(0x5865F2));
+            embed.setAuthor(target.getName(), null, "https://minotar.net/avatar/" + target.getName() + "/128");
+            embed.setThumbnail("https://minotar.net/avatar/" + target.getName() + "/128");
+
+            for (Map<?, ?> fieldMap : plugin.profileFields) {
+                String emoji = (String) fieldMap.get("emoji");
+                String label = (String) fieldMap.get("label");
+                String placeholder = (String) fieldMap.get("placeholder");
+                boolean inline = fieldMap.containsKey("inline") && (boolean) fieldMap.get("inline");
+                String value = plugin.getFieldValue(target, placeholder);
+                embed.addField(emoji + " " + label, value, inline);
+            }
+            embed.setFooter("Запрошено через Discord бота");
+            event.getMessage().replyEmbeds(embed.build()).queue();
         }
     }
 
@@ -218,7 +239,7 @@ public class IndepProfileBot extends JavaPlugin {
             String msgId = event.getMessageId();
             TopState state = plugin.topStates.get(msgId);
             if (state == null) {
-                event.reply("⏳ Это сообщение уже устарело. Вызовите `!top` снова.").setEphemeral(true).queue();
+                event.reply("⏳ Это сообщение устарело. Вызовите `!top` снова.").setEphemeral(true).queue();
                 return;
             }
 
@@ -228,13 +249,10 @@ public class IndepProfileBot extends JavaPlugin {
                 state.category = newCat;
                 state.page = 0;
             } else if (componentId.startsWith("top_page_")) {
-                // формат: top_page_<cat>_<page>
                 String[] parts = componentId.substring(9).split("_");
                 String cat = parts[0];
                 int newPage = Integer.parseInt(parts[1]);
-                if (cat.equals(state.category)) {
-                    state.page = newPage;
-                }
+                if (cat.equals(state.category)) state.page = newPage;
             }
 
             MessageEmbed newEmbed = plugin.buildTopEmbed(state.category, state.page);
@@ -248,18 +266,11 @@ public class IndepProfileBot extends JavaPlugin {
     private static class TopCategory {
         final String label;
         final String placeholder;
-        TopCategory(String label, String placeholder) {
-            this.label = label;
-            this.placeholder = placeholder;
-        }
+        TopCategory(String label, String placeholder) { this.label = label; this.placeholder = placeholder; }
     }
-
     private static class TopState {
         String category;
         int page;
-        TopState(String category, int page) {
-            this.category = category;
-            this.page = page;
-        }
+        TopState(String category, int page) { this.category = category; this.page = page; }
     }
 }
