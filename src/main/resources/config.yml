@@ -1,1 +1,58 @@
 bot-token: "ВСТАВЬТЕ_ВАШ_ТОКЕН_БОТА"
+
+profile-fields:
+  # Строка 1
+  - emoji: "⏳"
+    label: "Наиграно"
+    placeholder: "statistic_time_played"
+    inline: true
+  - emoji: "⚔️"
+    label: "Убито монстров"
+    placeholder: "_monster_kills_"
+    inline: true
+  - emoji: "💀"
+    label: "Смертей"
+    placeholder: "statistic_deaths"
+    inline: true
+
+  # Строка 2
+  - emoji: "⚔️"
+    label: "Нанесено урона"
+    placeholder: "statistic_damage_dealt"
+    inline: true
+  - emoji: "🛡️"
+    label: "Получено урона"
+    placeholder: "statistic_damage_taken"
+    inline: true
+  - emoji: "⏱️"
+    label: "Средняя жизнь"
+    placeholder: "_average_life_"
+    inline: true
+
+  # Строка 3
+  - emoji: "👣"
+    label: "Пройдено"
+    placeholder: "_distance_m_"
+    inline: true
+  - emoji: "⛏️"
+    label: "Добыто блоков"
+    placeholder: "statistic_mine_block"
+    inline: true
+  - emoji: "💎"
+    label: "Сделок с жителями"
+    placeholder: "statistic_traded_with_villager"
+    inline: true
+
+  # Строка 4 (эффективность по центру, пустые поля по бокам)
+  - emoji: ""                # ← пусто
+    label: ""
+    placeholder: "_blank_"
+    inline: true
+  - emoji: "⚡"
+    label: "Эффективность"
+    placeholder: "_efficiency_"
+    inline: true
+  - emoji: ""                # ← пусто
+    label: ""
+    placeholder: "_blank_"
+    inline: true
