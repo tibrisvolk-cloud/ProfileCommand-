@@ -106,14 +106,8 @@ two-factor-auth:
   enabled: true
   session-duration-minutes: 1440
   verification-timeout-minutes: 5
-  link-kick-message: |
-    &cПривяжите Discord!
-    &fВаш код: &e{CODE}
-    &fОтправьте боту в ЛС: &a!link {CODE}
-  verify-kick-message: |
-    &cПодтвердите вход через Discord!
-    &fБот отправил вам сообщение в ЛС.
-    &fНажмите кнопку "Подтвердить вход".
+  link-kick-message: '{"text":"Привяжите Discord!\nВаш код: {CODE}\nОтправьте боту Furissia#1471 в ЛС: !link {CODE}","color":"red"}'
+verify-kick-message: '{"text":"Подтвердите вход через Discord!\nБот отправил вам сообщение в ЛС.\nНажмите кнопку \"Подтвердить вход\".","color":"red"}'
 
 # ----------------------------
 # ДОСТИЖЕНИЯ И РОЛИ
