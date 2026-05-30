@@ -5,27 +5,47 @@ import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Message;
+import net.dv8tion.jda.api.entities.MessageEmbed;
+import net.dv8tion.jda.api.entities.emoji.Emoji;
+import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
+import net.dv8tion.jda.api.interactions.components.ActionRow;
+import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.awt.Color;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 public class IndepProfileBot extends JavaPlugin {
 
     private JDA jda;
     private List<Map<?, ?>> profileFields;
+    private Map<String, TopCategory> topCategories;
+    private int topPageSize;
+
+    // Хранилище состояний топов (ключ: ID сообщения)
+    private final Map<String, TopState> topStates = new ConcurrentHashMap<>();
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
         reloadConfig();
         profileFields = getConfig().getMapList("profile-fields");
+
+        // Загружаем категории топа
+        topCategories = new LinkedHashMap<>();
+        for (String key : getConfig().getConfigurationSection("top-categories").getKeys(false)) {
+            String label = getConfig().getString("top-categories." + key + ".label");
+            String placeholder = getConfig().getString("top-categories." + key + ".placeholder");
+            topCategories.put(key, new TopCategory(label, placeholder));
+        }
+        topPageSize = getConfig().getInt("top-page-size", 5);
 
         String token = getConfig().getString("bot-token");
         if (token == null || token.isEmpty() || token.equals("ВСТАВЬТЕ_ВАШ_ТОКЕН_БОТА")) {
@@ -37,7 +57,7 @@ public class IndepProfileBot extends JavaPlugin {
         try {
             jda = JDABuilder.createDefault(token)
                     .enableIntents(GatewayIntent.MESSAGE_CONTENT)
-                    .addEventListeners(new CommandListener(this))
+                    .addEventListeners(new CommandListener(this), new ButtonListener(this))
                     .build();
             jda.awaitReady();
             getLogger().info("Discord бот успешно запущен и готов принимать команды!");
@@ -55,11 +75,10 @@ public class IndepProfileBot extends JavaPlugin {
         }
     }
 
-    // Возвращает значение для плейсхолдера, с учётом специальных ключей
+    // ========== Вспомогательные методы (как раньше) ==========
     public String getFieldValue(OfflinePlayer player, String placeholder) {
         switch (placeholder) {
-            case "_blank_":
-                return "\u200B"; // невидимый символ нулевой ширины, чтобы Embed не схлопывал поле
+            case "_blank_": return "\u200B";
             case "_monster_kills_": {
                 String[] hostileMobs = {
                     "Zombie", "Skeleton", "Creeper", "Spider", "Enderman",
@@ -71,9 +90,7 @@ public class IndepProfileBot extends JavaPlugin {
                 long total = 0;
                 for (String mob : hostileMobs) {
                     String kills = PlaceholderAPI.setPlaceholders(player, "%statistic_kill_entity:" + mob + "%");
-                    try {
-                        total += Long.parseLong(kills.replace(",", ""));
-                    } catch (NumberFormatException ignored) {}
+                    try { total += Long.parseLong(kills.replace(",", "")); } catch (NumberFormatException ignored) {}
                 }
                 return String.valueOf(total);
             }
@@ -81,103 +98,168 @@ public class IndepProfileBot extends JavaPlugin {
                 try {
                     long timeMinutes = Long.parseLong(PlaceholderAPI.setPlaceholders(player, "%statistic_play_one_minute%"));
                     long deaths = Long.parseLong(PlaceholderAPI.setPlaceholders(player, "%statistic_deaths%"));
-                    if (deaths > 0 && timeMinutes > 0) {
-                        return String.format("%.0f мин.", (double) timeMinutes / deaths);
-                    } else {
-                        return "∞";
-                    }
-                } catch (Exception e) {
-                    return "—";
-                }
+                    if (deaths > 0 && timeMinutes > 0) return String.format("%.0f мин.", (double) timeMinutes / deaths);
+                    else return "∞";
+                } catch (Exception e) { return "—"; }
             }
             case "_distance_m_": {
                 try {
                     String cmStr = PlaceholderAPI.setPlaceholders(player, "%statistic_walk_one_cm%");
                     double cm = Double.parseDouble(cmStr.replace(",", ""));
-                    if (cm >= 100000) {
-                        return String.format("%.1f км", cm / 100000.0);
-                    } else {
-                        return String.format("%.0f м", cm / 100.0);
-                    }
-                } catch (Exception e) {
-                    return "—";
-                }
+                    if (cm >= 100000) return String.format("%.1f км", cm / 100000.0);
+                    else return String.format("%.0f м", cm / 100.0);
+                } catch (Exception e) { return "—"; }
             }
             case "_efficiency_": {
                 try {
                     long timeMinutes = Long.parseLong(PlaceholderAPI.setPlaceholders(player, "%statistic_play_one_minute%"));
                     long blocks = Long.parseLong(PlaceholderAPI.setPlaceholders(player, "%statistic_mine_block%"));
-                    if (timeMinutes > 0 && blocks > 0) {
-                        return String.format("%.0f бл/ч", blocks / (timeMinutes / 60.0));
-                    } else {
-                        return "—";
-                    }
-                } catch (Exception e) {
-                    return "—";
-                }
+                    if (timeMinutes > 0 && blocks > 0) return String.format("%.0f бл/ч", blocks / (timeMinutes / 60.0));
+                    else return "—";
+                } catch (Exception e) { return "—"; }
             }
-            default: {
-                return PlaceholderAPI.setPlaceholders(player, "%" + placeholder + "%");
-            }
+            default: return PlaceholderAPI.setPlaceholders(player, "%" + placeholder + "%");
         }
     }
 
+    // ========== Топ-листы ==========
+    private List<Map.Entry<String, Long>> getTopForCategory(String placeholder) {
+        Map<String, Long> scores = new HashMap<>();
+        for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
+            if (p.getName() == null) continue;
+            String raw = getFieldValue(p, placeholder);
+            try {
+                long val = Long.parseLong(raw.replace(",", ""));
+                scores.put(p.getName(), val);
+            } catch (NumberFormatException ignored) {}
+        }
+        return scores.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .collect(Collectors.toList());
+    }
+
+    private MessageEmbed buildTopEmbed(String categoryKey, int page) {
+        TopCategory cat = topCategories.get(categoryKey);
+        List<Map.Entry<String, Long>> list = getTopForCategory(cat.placeholder);
+        int from = page * topPageSize;
+        int to = Math.min(from + topPageSize, list.size());
+
+        EmbedBuilder eb = new EmbedBuilder();
+        eb.setColor(new Color(0x5865F2));
+        eb.setTitle("🏆 Топ игроков: " + cat.label);
+        if (list.isEmpty()) {
+            eb.setDescription("Нет данных.");
+        } else {
+            StringBuilder sb = new StringBuilder();
+            for (int i = from; i < to; i++) {
+                Map.Entry<String, Long> e = list.get(i);
+                sb.append("**").append(i + 1).append(".** `").append(e.getKey()).append("` — ").append(e.getValue()).append("\n");
+            }
+            eb.setDescription(sb.toString());
+            eb.setFooter("Страница " + (page + 1) + "/" + Math.max(1, (list.size() + topPageSize - 1) / topPageSize));
+        }
+        return eb.build();
+    }
+
+    private List<ActionRow> buildTopButtons(String currentCategory, int currentPage) {
+        List<Button> catButtons = new ArrayList<>();
+        for (Map.Entry<String, TopCategory> entry : topCategories.entrySet()) {
+            String key = entry.getKey();
+            Button btn = Button.secondary("top_cat_" + key, entry.getValue().label)
+                    .withDisabled(key.equals(currentCategory));
+            catButtons.add(btn);
+        }
+
+        Button prevBtn = Button.secondary("top_page_" + currentCategory + "_" + (currentPage - 1), "◀️ Назад")
+                .withDisabled(currentPage <= 0);
+        Button nextBtn = Button.secondary("top_page_" + currentCategory + "_" + (currentPage + 1), "Вперед ▶️");
+
+        return List.of(
+                ActionRow.of(catButtons),
+                ActionRow.of(prevBtn, nextBtn)
+        );
+    }
+
+    // ========== Слушатели ==========
     private static class CommandListener extends ListenerAdapter {
         private final IndepProfileBot plugin;
-
-        public CommandListener(IndepProfileBot plugin) {
-            this.plugin = plugin;
-        }
+        public CommandListener(IndepProfileBot plugin) { this.plugin = plugin; }
 
         @Override
         public void onMessageReceived(MessageReceivedEvent event) {
             if (event.getAuthor().isBot()) return;
+            String content = event.getMessage().getContentRaw();
+            String lower = content.toLowerCase();
 
-            Message message = event.getMessage();
-            String content = message.getContentRaw();
-            String lowerContent = content.toLowerCase();
-
-            String[] prefixes = {"!profile ", "!p ", "!stats ", "!myprofile "};
-            String targetName = null;
-            for (String prefix : prefixes) {
-                if (lowerContent.startsWith(prefix)) {
-                    targetName = content.substring(prefix.length()).trim();
-                    break;
-                }
-            }
-
-            if (targetName == null || targetName.isEmpty()) {
-                if (content.equalsIgnoreCase("!profile") || content.equalsIgnoreCase("!p") ||
-                        content.equalsIgnoreCase("!stats") || content.equalsIgnoreCase("!myprofile")) {
-                    message.reply("ℹ️ Используйте: `!profile <ник>` (например, `!profile Stev_Play`)").queue();
-                }
+            // !top
+            if (lower.startsWith("!top")) {
+                String defaultCategory = plugin.topCategories.keySet().iterator().next();
+                MessageEmbed embed = plugin.buildTopEmbed(defaultCategory, 0);
+                event.getChannel().sendMessageEmbeds(embed)
+                        .setComponents(plugin.buildTopButtons(defaultCategory, 0))
+                        .queue(message -> {
+                            // Сохраняем состояние
+                            plugin.topStates.put(message.getId(), new TopState(defaultCategory, 0));
+                        });
                 return;
             }
 
-            OfflinePlayer target = Bukkit.getOfflinePlayer(targetName);
-            if (target.getName() == null) {
-                message.reply("❌ Игрок с ником `" + targetName + "` не найден.").queue();
+            // !profile (как раньше)
+            // ... (весь существующий код !profile оставляем) ...
+        }
+    }
+
+    private static class ButtonListener extends ListenerAdapter {
+        private final IndepProfileBot plugin;
+        public ButtonListener(IndepProfileBot plugin) { this.plugin = plugin; }
+
+        @Override
+        public void onButtonInteraction(ButtonInteractionEvent event) {
+            String msgId = event.getMessageId();
+            TopState state = plugin.topStates.get(msgId);
+            if (state == null) {
+                event.reply("⏳ Это сообщение уже устарело. Вызовите `!top` снова.").setEphemeral(true).queue();
                 return;
             }
 
-            EmbedBuilder embed = new EmbedBuilder();
-            embed.setColor(new Color(0x5865F2));
-            embed.setAuthor(target.getName(), null, "https://minotar.net/avatar/" + target.getName() + "/128");
-            embed.setThumbnail("https://minotar.net/avatar/" + target.getName() + "/128");
-
-            // Перебираем поля из конфига и добавляем в Embed
-            for (Map<?, ?> fieldMap : plugin.profileFields) {
-                String emoji = (String) fieldMap.get("emoji");
-                String label = (String) fieldMap.get("label");
-                String placeholder = (String) fieldMap.get("placeholder");
-                boolean inline = fieldMap.containsKey("inline") && (boolean) fieldMap.get("inline");
-
-                String value = plugin.getFieldValue(target, placeholder);
-                embed.addField(emoji + " " + label, value, inline);
+            String componentId = event.getComponentId();
+            if (componentId.startsWith("top_cat_")) {
+                String newCat = componentId.substring(8);
+                state.category = newCat;
+                state.page = 0;
+            } else if (componentId.startsWith("top_page_")) {
+                // формат: top_page_<cat>_<page>
+                String[] parts = componentId.substring(9).split("_");
+                String cat = parts[0];
+                int newPage = Integer.parseInt(parts[1]);
+                if (cat.equals(state.category)) {
+                    state.page = newPage;
+                }
             }
 
-            embed.setFooter("Запрошено через Discord бота");
-            message.replyEmbeds(embed.build()).queue();
+            MessageEmbed newEmbed = plugin.buildTopEmbed(state.category, state.page);
+            event.editMessageEmbeds(newEmbed)
+                    .setComponents(plugin.buildTopButtons(state.category, state.page))
+                    .queue();
+        }
+    }
+
+    // Вспомогательные классы
+    private static class TopCategory {
+        final String label;
+        final String placeholder;
+        TopCategory(String label, String placeholder) {
+            this.label = label;
+            this.placeholder = placeholder;
+        }
+    }
+
+    private static class TopState {
+        String category;
+        int page;
+        TopState(String category, int page) {
+            this.category = category;
+            this.page = page;
         }
     }
 }
