@@ -1,5 +1,6 @@
 bot-token: "ВСТАВЬТЕ_ВАШ_ТОКЕН_БОТА"
 
+# Профиль
 profile-fields:
   # Строка 1
   - emoji: "⏳"
@@ -7,8 +8,8 @@ profile-fields:
     placeholder: "statistic_time_played"
     inline: true
   - emoji: "⚔️"
-    label: "Убито монстров"
-    placeholder: "_monster_kills_"
+    label: "Убито мобов"
+    placeholder: "statistic_mob_kills"          # <-- теперь общий счётчик
     inline: true
   - emoji: "💀"
     label: "Смертей"
@@ -43,8 +44,8 @@ profile-fields:
     placeholder: "statistic_traded_with_villager"
     inline: true
 
-  # Строка 4 (эффективность по центру, пустые поля по бокам)
-  - emoji: ""                # ← пусто
+  # Строка 4 (эффективность по центру)
+  - emoji: ""
     label: ""
     placeholder: "_blank_"
     inline: true
@@ -52,7 +53,43 @@ profile-fields:
     label: "Эффективность"
     placeholder: "_efficiency_"
     inline: true
-  - emoji: ""                # ← пусто
+  - emoji: ""
     label: ""
     placeholder: "_blank_"
     inline: true
+
+# Категории для топа
+top-categories:
+  mobs:
+    label: "⚔️ Убито мобов"
+    placeholder: "statistic_mob_kills"
+  blocks:
+    label: "⛏️ Добыто блоков"
+    placeholder: "statistic_mine_block"
+  damage_dealt:
+    label: "⚔️ Нанесено урона"
+    placeholder: "statistic_damage_dealt"
+  damage_taken:
+    label: "🛡️ Получено урона"
+    placeholder: "statistic_damage_taken"
+  deaths:
+    label: "💀 Смертей"
+    placeholder: "statistic_deaths"
+  trades:
+    label: "💎 Сделок с жителями"
+    placeholder: "statistic_traded_with_villager"
+  distance:
+    label: "👣 Пройдено"
+    placeholder: "_distance_m_"
+  efficiency:
+    label: "⚡ Эффективность"
+    placeholder: "_efficiency_"
+  playtime:
+    label: "⏳ Время игры"
+    placeholder: "statistic_time_played"
+  avg_life:
+    label: "⏱️ Средняя жизнь"
+    placeholder: "_average_life_"
+
+# Размер страницы топа
+top-page-size: 10
