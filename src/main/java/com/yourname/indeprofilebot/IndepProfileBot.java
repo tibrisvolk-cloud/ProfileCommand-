@@ -254,7 +254,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     // ==================== Рекорды ====================
     private void updateRecordsMessage() {
         if (recordsChannelId.isEmpty()) return;
-        TextChannel channel = jda.getTextChannelById(recordsChannelId);
+        GuildMessageChannel channel = jda.getChannelById(GuildMessageChannel.class, recordsChannelId);
         if (channel == null) {
             getLogger().warning("Канал рекордов не найден: " + recordsChannelId);
             return;
