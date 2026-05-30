@@ -1,37 +1,30 @@
 bot-token: "ВСТАВЬТЕ_ВАШ_ТОКЕН_БОТА"
 
-two-factor-auth:
-  enabled: true
-  # Время жизни сессии (минут), если IP не менялся
-  session-duration-minutes: 1440  # сутки
-  # Сообщение при кике на привязку
-  link-kick-message: |
-    &cПривяжите Discord!
-    &fВаш код: &e{CODE}
-    &fОтправьте боту в ЛС: &a!link {CODE}
-  # Сообщение при кике на подтверждение входа
-  verify-kick-message: |
-    &cПодтвердите вход через Discord!
-    &fБот отправил вам сообщение в ЛС.
-    &fНажмите кнопку "Подтвердить вход".
+# ID Discord-сервера (гильдии) и роль "Игрок"
+guild-id: "123456789012345678"
+player-role-id: "123456789012345678"
 
-# Профиль
+# Синхронизация при входе
+sync-on-join:
+  nick: true
+  role: true
+
+# ----------------------------
+# ПРОФИЛЬ
+# ----------------------------
 profile-fields:
-  # Строка 1
   - emoji: "⏳"
     label: "Наиграно"
     placeholder: "statistic_time_played"
     inline: true
   - emoji: "⚔️"
     label: "Убито мобов"
-    placeholder: "statistic_mob_kills"          # <-- теперь общий счётчик
+    placeholder: "statistic_mob_kills"
     inline: true
   - emoji: "💀"
     label: "Смертей"
     placeholder: "statistic_deaths"
     inline: true
-
-  # Строка 2
   - emoji: "⚔️"
     label: "Нанесено урона"
     placeholder: "statistic_damage_dealt"
@@ -44,8 +37,6 @@ profile-fields:
     label: "Средняя жизнь"
     placeholder: "_average_life_"
     inline: true
-
-  # Строка 3
   - emoji: "👣"
     label: "Пройдено"
     placeholder: "_distance_m_"
@@ -58,8 +49,6 @@ profile-fields:
     label: "Сделок с жителями"
     placeholder: "statistic_traded_with_villager"
     inline: true
-
-  # Строка 4 (эффективность по центру)
   - emoji: ""
     label: ""
     placeholder: "_blank_"
@@ -73,9 +62,14 @@ profile-fields:
     placeholder: "_blank_"
     inline: true
 
-# Категории для топа
+# ----------------------------
+# ТОП-ЛИСТЫ
+# ----------------------------
 top-categories:
   mobs:
+  playtime:
+    label: "⏳ Время игры"
+    placeholder: "statistic_time_played"
     label: "⚔️ Убито мобов"
     placeholder: "statistic_mob_kills"
   blocks:
@@ -99,12 +93,54 @@ top-categories:
   efficiency:
     label: "⚡ Эффективность"
     placeholder: "_efficiency_"
-  playtime:
-    label: "⏳ Время игры"
-    placeholder: "statistic_time_played"
   avg_life:
     label: "⏱️ Средняя жизнь"
     placeholder: "_average_life_"
 
-# Размер страницы топа
 top-page-size: 10
+
+# ----------------------------
+# 2FA
+# ----------------------------
+two-factor-auth:
+  enabled: true
+  session-duration-minutes: 1440
+  verification-timeout-minutes: 5
+  link-kick-message: |
+    &cПривяжите Discord!
+    &fВаш код: &e{CODE}
+    &fОтправьте боту в ЛС: &a!link {CODE}
+  verify-kick-message: |
+    &cПодтвердите вход через Discord!
+    &fБот отправил вам сообщение в ЛС.
+    &fНажмите кнопку "Подтвердить вход".
+
+# ----------------------------
+# ДОСТИЖЕНИЯ И РОЛИ
+# ----------------------------
+achievements:
+  check-on-join: true
+  list:
+    veteran:
+      label: "⏳ Старейшина"
+      placeholder: "statistic_play_one_minute"
+      threshold: 1800
+      role-id: "123456789012345678"
+    hunter:
+      label: "⚔️ Охотник"
+      placeholder: "statistic_mob_kills"
+      threshold: 1000
+      role-id: "123456789012345679"
+    miner:
+      label: "⛏️ Шахтёр"
+      placeholder: "statistic_mine_block"
+      threshold: 10000
+      role-id: "123456789012345680"
+
+# ----------------------------
+# РЕКОРДЫ СЕРВЕРА (живой щит)
+# ----------------------------
+records:
+  channel-id: "123456789012345678"
+  image-url: "https://example.com/landscape.png"
+  update-interval-minutes: 10
