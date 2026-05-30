@@ -4,9 +4,7 @@ import me.clip.placeholderapi.PlaceholderAPI;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
-import net.dv8tion.jda.api.entities.Message;
-import net.dv8tion.jda.api.entities.MessageEmbed;
-import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.entities.*;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -15,12 +13,16 @@ import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitRunnable;
 
 import java.awt.Color;
 import java.io.File;
@@ -41,6 +43,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     // 2FA
     private boolean twoFactorEnabled;
     private int sessionDurationMinutes;
+    private int verificationTimeoutMinutes;
     private String linkKickMessage;
     private String verifyKickMessage;
     private final Map<String, String> linkCodes = new ConcurrentHashMap<>();
@@ -49,6 +52,24 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private final Map<UUID, SessionInfo> sessions = new ConcurrentHashMap<>();
     private File linkedFile;
     private FileConfiguration linkedConfig;
+
+    // Синхронизация на сервере
+    private String guildId;
+    private String playerRoleId;
+    private boolean syncNick;
+    private boolean syncRole;
+
+    // Достижения
+    private boolean achievementsEnabled;
+    private List<Achievement> achievements;
+    private File achievementsFile;
+    private FileConfiguration achievementsConfig;
+
+    // Рекорды
+    private String recordsChannelId;
+    private String recordsImageUrl;
+    private int recordsUpdateInterval;
+    private String recordsMessageId;
 
     @Override
     public void onEnable() {
@@ -64,11 +85,20 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
         topPageSize = getConfig().getInt("top-page-size", 5);
 
+        // 2FA настройки
         twoFactorEnabled = getConfig().getBoolean("two-factor-auth.enabled", false);
         sessionDurationMinutes = getConfig().getInt("two-factor-auth.session-duration-minutes", 1440);
-        linkKickMessage = getConfig().getString("two-factor-auth.link-kick-message", "Привяжите Discord! Код: {CODE}");
-        verifyKickMessage = getConfig().getString("two-factor-auth.verify-kick-message", "Подтвердите вход через Discord");
+        verificationTimeoutMinutes = getConfig().getInt("two-factor-auth.verification-timeout-minutes", 5);
+        linkKickMessage = getConfig().getString("two-factor-auth.link-kick-message", "");
+        verifyKickMessage = getConfig().getString("two-factor-auth.verify-kick-message", "");
 
+        // Синхронизация
+        guildId = getConfig().getString("guild-id", "");
+        playerRoleId = getConfig().getString("player-role-id", "");
+        syncNick = getConfig().getBoolean("sync-on-join.nick", false);
+        syncRole = getConfig().getBoolean("sync-on-join.role", false);
+
+        // Загрузка привязок
         linkedFile = new File(getDataFolder(), "linked.yml");
         if (!linkedFile.exists()) {
             try { linkedFile.createNewFile(); } catch (IOException ignored) {}
@@ -79,6 +109,33 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             String discordId = linkedConfig.getString(uuidStr);
             linkedAccounts.put(uuid, discordId);
         }
+
+        // Достижения
+        achievementsEnabled = getConfig().getBoolean("achievements.check-on-join", false);
+        achievements = new ArrayList<>();
+        if (achievementsEnabled) {
+            ConfigurationSection achList = getConfig().getConfigurationSection("achievements.list");
+            if (achList != null) {
+                for (String key : achList.getKeys(false)) {
+                    String label = achList.getString(key + ".label");
+                    String placeholder = achList.getString(key + ".placeholder");
+                    long threshold = achList.getLong(key + ".threshold");
+                    String roleId = achList.getString(key + ".role-id");
+                    achievements.add(new Achievement(key, label, placeholder, threshold, roleId));
+                }
+            }
+            achievementsFile = new File(getDataFolder(), "achievements.yml");
+            if (!achievementsFile.exists()) {
+                try { achievementsFile.createNewFile(); } catch (IOException ignored) {}
+            }
+            achievementsConfig = YamlConfiguration.loadConfiguration(achievementsFile);
+        }
+
+        // Рекорды
+        recordsChannelId = getConfig().getString("records.channel-id", "");
+        recordsImageUrl = getConfig().getString("records.image-url", "");
+        recordsUpdateInterval = getConfig().getInt("records.update-interval-minutes", 10);
+        loadRecordsState(); // восстанавливаем ID сообщения рекордов
 
         String token = getConfig().getString("bot-token");
         if (token == null || token.isEmpty() || token.equals("ВСТАВЬТЕ_ВАШ_ТОКЕН_БОТА")) {
@@ -93,7 +150,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     .addEventListeners(new CommandListener(this), new ButtonListener(this))
                     .build();
             jda.awaitReady();
-            getLogger().info("Discord бот запущен. Профили, топы и 2FA готовы.");
+            getLogger().info("Discord бот запущен. Все модули активны.");
         } catch (Exception e) {
             getLogger().severe("Ошибка запуска Discord бота: " + e.getMessage());
             e.printStackTrace();
@@ -102,11 +159,162 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
 
         getServer().getPluginManager().registerEvents(this, this);
+
+        // Периодическое обновление рекордов
+        if (!recordsChannelId.isEmpty()) {
+            new BukkitRunnable() {
+                @Override
+                public void run() {
+                    updateRecordsMessage();
+                }
+            }.runTaskTimer(this, 100L, 20L * 60 * recordsUpdateInterval);
+        }
     }
 
     @Override
     public void onDisable() {
         if (jda != null) jda.shutdown();
+    }
+
+    // ==================== Синхронизация при входе ====================
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        Player player = event.getPlayer();
+        UUID uuid = player.getUniqueId();
+        String discordId = linkedAccounts.get(uuid);
+
+        // Синхронизация ника и роли
+        if (discordId != null && !guildId.isEmpty() && (syncNick || syncRole)) {
+            Guild guild = jda.getGuildById(guildId);
+            if (guild != null) {
+                guild.retrieveMemberById(discordId).queue(member -> {
+                    if (syncRole && !playerRoleId.isEmpty()) {
+                        Role role = guild.getRoleById(playerRoleId);
+                        if (role != null && !member.getRoles().contains(role)) {
+                            guild.addRoleToMember(member, role).queue();
+                        }
+                    }
+                    if (syncNick) {
+                        String nick = player.getName();
+                        if (!nick.equals(member.getNickname())) {
+                            guild.modifyNickname(member, nick).queue();
+                        }
+                    }
+                });
+            }
+        }
+
+        // Проверка достижений
+        if (achievementsEnabled) {
+            checkAchievements(player);
+        }
+    }
+
+    // ==================== Достижения ====================
+    private void checkAchievements(Player player) {
+        UUID uuid = player.getUniqueId();
+        List<String> earned = achievementsConfig.getStringList(uuid.toString());
+        boolean changed = false;
+        for (Achievement ach : achievements) {
+            if (earned.contains(ach.id)) continue;
+            long value = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%" + ach.placeholder + "%"));
+            if (value >= ach.threshold) {
+                earned.add(ach.id);
+                changed = true;
+                // Выдача роли
+                if (!guildId.isEmpty() && !ach.roleId.isEmpty()) {
+                    String discordId = linkedAccounts.get(uuid);
+                    if (discordId != null) {
+                        Guild guild = jda.getGuildById(guildId);
+                        if (guild != null) {
+                            guild.retrieveMemberById(discordId).queue(member -> {
+                                Role role = guild.getRoleById(ach.roleId);
+                                if (role != null && !member.getRoles().contains(role)) {
+                                    guild.addRoleToMember(member, role).queue(
+                                        s -> getLogger().info("Выдана роль " + ach.label + " игроку " + player.getName()),
+                                        f -> getLogger().warning("Не удалось выдать роль " + ach.label)
+                                    );
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        if (changed) {
+            achievementsConfig.set(uuid.toString(), earned);
+            try {
+                achievementsConfig.save(achievementsFile);
+            } catch (IOException e) {
+                getLogger().warning("Не удалось сохранить achievements.yml");
+            }
+        }
+    }
+
+    // ==================== Рекорды ====================
+    private void updateRecordsMessage() {
+        if (recordsChannelId.isEmpty()) return;
+        TextChannel channel = jda.getTextChannelById(recordsChannelId);
+        if (channel == null) {
+            getLogger().warning("Канал рекордов не найден: " + recordsChannelId);
+            return;
+        }
+
+        EmbedBuilder embed = new EmbedBuilder();
+        embed.setColor(new Color(0x5865F2));
+        embed.setTitle("🏆 Рекорды сервера за всё время");
+        if (!recordsImageUrl.isEmpty()) {
+            embed.setImage(recordsImageUrl);
+        }
+
+        StringBuilder desc = new StringBuilder();
+        for (Map.Entry<String, TopCategory> entry : topCategories.entrySet()) {
+            TopCategory cat = entry.getValue();
+            List<Map.Entry<String, Long>> top = getTopForCategory(cat.placeholder);
+            if (!top.isEmpty()) {
+                Map.Entry<String, Long> first = top.get(0);
+                desc.append(cat.label).append(": **").append(first.getKey()).append("** — ").append(first.getValue()).append("\n");
+            } else {
+                desc.append(cat.label).append(": *нет данных*\n");
+            }
+        }
+        embed.setDescription(desc.toString());
+        embed.setFooter("Обновляется каждые " + recordsUpdateInterval + " мин.");
+
+        if (recordsMessageId != null && !recordsMessageId.isEmpty()) {
+            channel.editMessageEmbedsById(recordsMessageId, embed.build()).queue(
+                success -> {},
+                failure -> {
+                    // если сообщение удалено, отправляем новое
+                    channel.sendMessageEmbeds(embed.build()).queue(msg -> {
+                        recordsMessageId = msg.getId();
+                        saveRecordsState();
+                    });
+                }
+            );
+        } else {
+            channel.sendMessageEmbeds(embed.build()).queue(msg -> {
+                recordsMessageId = msg.getId();
+                saveRecordsState();
+            });
+        }
+    }
+
+    private void saveRecordsState() {
+        File stateFile = new File(getDataFolder(), "records-state.yml");
+        FileConfiguration stateConfig = YamlConfiguration.loadConfiguration(stateFile);
+        stateConfig.set("message-id", recordsMessageId);
+        try { stateConfig.save(stateFile); } catch (IOException e) {
+            getLogger().warning("Не удалось сохранить records-state.yml");
+        }
+    }
+
+    private void loadRecordsState() {
+        File stateFile = new File(getDataFolder(), "records-state.yml");
+        if (stateFile.exists()) {
+            FileConfiguration stateConfig = YamlConfiguration.loadConfiguration(stateFile);
+            recordsMessageId = stateConfig.getString("message-id", "");
+        }
     }
 
     // ==================== 2FA ====================
@@ -130,6 +338,10 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         if (session != null && session.ip.equals(ip) && System.currentTimeMillis() < session.expiry) {
             return;
         }
+
+        long timeoutMillis = TimeUnit.MINUTES.toMillis(verificationTimeoutMinutes);
+        pendingVerifications.entrySet().removeIf(entry ->
+                System.currentTimeMillis() - entry.getValue().timestamp > timeoutMillis);
 
         long timestamp = System.currentTimeMillis();
         pendingVerifications.put(uuid, new PendingVerification(ip, timestamp));
@@ -156,7 +368,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         synchronized (linkCodes) {
             String uuidStr = linkCodes.remove(code);
             if (uuidStr == null) {
-                event.getMessage().reply("❌ Неверный или устаревший код. Зайдите на сервер для получения нового.").queue();
+                event.getMessage().reply("❌ Неверный или устаревший код.").queue();
                 return;
             }
             uuid = UUID.fromString(uuidStr);
@@ -164,21 +376,81 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         String discordId = event.getAuthor().getId();
         linkedAccounts.put(uuid, discordId);
         linkedConfig.set(uuid.toString(), discordId);
-        try { linkedConfig.save(linkedFile); } catch (IOException e) { getLogger().warning("Не удалось сохранить linked.yml"); }
-        event.getMessage().reply("✅ Ваш Minecraft-аккаунт привязан к Discord! Можете заходить.").queue();
+        try { linkedConfig.save(linkedFile); } catch (IOException e) { getLogger().warning("Ошибка сохранения linked.yml"); }
+        event.getMessage().reply("✅ Аккаунт привязан! Можете заходить.").queue();
+    }
+
+    public void handleUnlinkCommand(MessageReceivedEvent event) {
+        String discordId = event.getAuthor().getId();
+        UUID uuidToRemove = null;
+        for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
+            if (entry.getValue().equals(discordId)) {
+                uuidToRemove = entry.getKey();
+                break;
+            }
+        }
+        if (uuidToRemove == null) {
+            event.getMessage().reply("❌ Ваш Discord не привязан ни к одному аккаунту.").queue();
+            return;
+        }
+
+        linkedAccounts.remove(uuidToRemove);
+        linkedConfig.set(uuidToRemove.toString(), null);
+        try { linkedConfig.save(linkedFile); } catch (IOException e) { getLogger().warning("Ошибка сохранения linked.yml"); }
+        sessions.remove(uuidToRemove);
+        pendingVerifications.remove(uuidToRemove);
+
+        if (!guildId.isEmpty()) {
+            Guild guild = jda.getGuildById(guildId);
+            if (guild != null) {
+                guild.retrieveMemberById(discordId).queue(member -> {
+                    if (!playerRoleId.isEmpty()) {
+                        Role role = guild.getRoleById(playerRoleId);
+                        if (role != null && member.getRoles().contains(role)) {
+                            guild.removeRoleFromMember(member, role).queue();
+                        }
+                    }
+                    if (syncNick && member.getNickname() != null) {
+                        guild.modifyNickname(member, null).queue();
+                    }
+                });
+            }
+        }
+        event.getMessage().reply("✅ Привязка удалена.").queue();
     }
 
     public void handleConfirmButton(ButtonInteractionEvent event, UUID uuid) {
-        PendingVerification pending = pendingVerifications.remove(uuid);
+        PendingVerification pending = pendingVerifications.get(uuid);
         if (pending == null) {
-            event.reply("⏳ Запрос уже недействителен. Перезайдите на сервер.").setEphemeral(true).queue();
+            event.reply("⏳ Запрос недействителен.").setEphemeral(true).queue();
             return;
         }
-        sessions.put(uuid, new SessionInfo(pending.ip, System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(sessionDurationMinutes)));
+
+        long timeoutMillis = TimeUnit.MINUTES.toMillis(verificationTimeoutMinutes);
+        if (System.currentTimeMillis() - pending.timestamp > timeoutMillis) {
+            pendingVerifications.remove(uuid);
+            event.reply("⏳ Запрос истёк. Перезайдите на сервер.").setEphemeral(true).queue();
+            return;
+        }
+
+        pendingVerifications.remove(uuid);
+        sessions.put(uuid, new SessionInfo(pending.ip,
+                System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(sessionDurationMinutes)));
         event.editMessage("✅ Вход подтверждён. Можете зайти на сервер.").setComponents().queue();
     }
 
     // ==================== Общие хелперы ====================
+    private long parseStatistic(String raw) {
+        if (raw == null) return 0;
+        String cleaned = raw.replaceAll("[^0-9]", "");
+        if (cleaned.isEmpty()) return 0;
+        try {
+            return Long.parseLong(cleaned);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
     public String getFieldValue(OfflinePlayer player, String placeholder) {
         switch (placeholder) {
             case "_blank_": return "\u200B";
@@ -186,33 +458,31 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 String[] hostileMobs = {"Zombie","Skeleton","Creeper","Spider","Enderman","Witch","Slime","Ghast","Blaze","Wither_Skeleton","Phantom","Drowned","Guardian","Elder_Guardian","Hoglin","Piglin","Zombified_Piglin","Magma_Cube","Silverfish","Endermite"};
                 long total = 0;
                 for (String mob : hostileMobs) {
-                    String kills = PlaceholderAPI.setPlaceholders(player, "%statistic_kill_entity:" + mob + "%");
-                    try { total += Long.parseLong(kills.replace(",", "")); } catch (NumberFormatException ignored) {}
+                    total += parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_kill_entity:" + mob + "%"));
                 }
                 return String.valueOf(total);
             }
             case "_average_life_": {
-                try {
-                    long timeMinutes = Long.parseLong(PlaceholderAPI.setPlaceholders(player, "%statistic_play_one_minute%"));
-                    long deaths = Long.parseLong(PlaceholderAPI.setPlaceholders(player, "%statistic_deaths%"));
-                    return (deaths > 0 && timeMinutes > 0) ? String.format("%.0f мин.", (double) timeMinutes / deaths) : "∞";
-                } catch (Exception e) { return "—"; }
+                long mins = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_play_one_minute%"));
+                long deaths = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_deaths%"));
+                if (deaths > 0 && mins > 0) return String.format("%.0f мин.", (double) mins / deaths);
+                else return "∞";
             }
             case "_distance_m_": {
-                try {
-                    String cmStr = PlaceholderAPI.setPlaceholders(player, "%statistic_walk_one_cm%");
-                    double cm = Double.parseDouble(cmStr.replace(",", ""));
-                    return cm >= 100000 ? String.format("%.1f км", cm / 100000.0) : String.format("%.0f м", cm / 100.0);
-                } catch (Exception e) { return "—"; }
+                long cm = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_walk_one_cm%"));
+                if (cm >= 100000) return String.format("%.1f км", cm / 100000.0);
+                else return String.format("%.0f м", cm / 100.0);
             }
             case "_efficiency_": {
-                try {
-                    long timeMinutes = Long.parseLong(PlaceholderAPI.setPlaceholders(player, "%statistic_play_one_minute%"));
-                    long blocks = Long.parseLong(PlaceholderAPI.setPlaceholders(player, "%statistic_mine_block%"));
-                    return (timeMinutes > 0 && blocks > 0) ? String.format("%.0f бл/ч", blocks / (timeMinutes / 60.0)) : "—";
-                } catch (Exception e) { return "—"; }
+                long mins = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_play_one_minute%"));
+                long blocks = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_mine_block%"));
+                if (mins > 0 && blocks > 0) return String.format("%.0f бл/ч", blocks / (mins / 60.0));
+                else return "—";
             }
-            default: return PlaceholderAPI.setPlaceholders(player, "%" + placeholder + "%");
+            default: {
+                String raw = PlaceholderAPI.setPlaceholders(player, "%" + placeholder + "%");
+                try { return String.valueOf(parseStatistic(raw)); } catch (Exception e) { return raw; }
+            }
         }
     }
 
@@ -220,19 +490,26 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         Map<String, Long> scores = new HashMap<>();
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
             if (p.getName() == null) continue;
-            String raw = getFieldValue(p, placeholder);
-            try { scores.put(p.getName(), Long.parseLong(raw.replace(",", ""))); } catch (NumberFormatException ignored) {}
+            long val = parseStatistic(PlaceholderAPI.setPlaceholders(p, "%" + placeholder + "%"));
+            scores.put(p.getName(), val);
         }
-        return scores.entrySet().stream().sorted(Map.Entry.<String, Long>comparingByValue().reversed()).collect(Collectors.toList());
+        return scores.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .collect(Collectors.toList());
     }
 
     private MessageEmbed buildTopEmbed(String categoryKey, int page) {
         TopCategory cat = topCategories.get(categoryKey);
         List<Map.Entry<String, Long>> list = getTopForCategory(cat.placeholder);
-        int from = page * topPageSize, to = Math.min(from + topPageSize, list.size());
-        EmbedBuilder eb = new EmbedBuilder().setColor(new Color(0x5865F2)).setTitle("🏆 Топ игроков: " + cat.label);
-        if (list.isEmpty()) { eb.setDescription("Нет данных."); }
-        else {
+        int from = page * topPageSize;
+        int to = Math.min(from + topPageSize, list.size());
+
+        EmbedBuilder eb = new EmbedBuilder();
+        eb.setColor(new Color(0x5865F2));
+        eb.setTitle("🏆 Топ игроков: " + cat.label);
+        if (list.isEmpty()) {
+            eb.setDescription("Нет данных.");
+        } else {
             StringBuilder sb = new StringBuilder();
             for (int i = from; i < to; i++) {
                 Map.Entry<String, Long> e = list.get(i);
@@ -248,11 +525,20 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         List<Button> catButtons = new ArrayList<>();
         for (Map.Entry<String, TopCategory> entry : topCategories.entrySet()) {
             String key = entry.getKey();
-            catButtons.add(Button.secondary("top_cat_" + key, entry.getValue().label).withDisabled(key.equals(currentCategory)));
+            catButtons.add(Button.secondary("top_cat_" + key, entry.getValue().label)
+                    .withDisabled(key.equals(currentCategory)));
         }
-        Button prevBtn = Button.secondary("top_page_" + currentCategory + "_" + (currentPage - 1), "◀️ Назад").withDisabled(currentPage <= 0);
+        List<ActionRow> rows = new ArrayList<>();
+        int maxPerRow = 5;
+        for (int i = 0; i < catButtons.size(); i += maxPerRow) {
+            int end = Math.min(i + maxPerRow, catButtons.size());
+            rows.add(ActionRow.of(catButtons.subList(i, end)));
+        }
+        Button prevBtn = Button.secondary("top_page_" + currentCategory + "_" + (currentPage - 1), "◀️ Назад")
+                .withDisabled(currentPage <= 0);
         Button nextBtn = Button.secondary("top_page_" + currentCategory + "_" + (currentPage + 1), "Вперед ▶️");
-        return List.of(ActionRow.of(catButtons), ActionRow.of(prevBtn, nextBtn));
+        rows.add(ActionRow.of(prevBtn, nextBtn));
+        return rows;
     }
 
     // ==================== Слушатели ====================
@@ -276,8 +562,12 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
 
             if (lower.startsWith("!link ") && plugin.twoFactorEnabled) {
-                String code = content.substring(6).trim();
-                plugin.handleLinkCommand(event, code);
+                plugin.handleLinkCommand(event, content.substring(6).trim());
+                return;
+            }
+
+            if (lower.equals("!unlink") && plugin.twoFactorEnabled) {
+                plugin.handleUnlinkCommand(event);
                 return;
             }
 
@@ -291,14 +581,14 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
             if (targetName == null || targetName.isEmpty()) {
                 if (lower.equals("!profile") || lower.equals("!p") || lower.equals("!stats") || lower.equals("!myprofile")) {
-                    event.getMessage().reply("ℹ️ Используйте: `!profile <ник>` (например, `!profile Stev_Play`)").queue();
+                    event.getMessage().reply("ℹ️ Используйте: `!profile <ник>`").queue();
                 }
                 return;
             }
 
             OfflinePlayer target = Bukkit.getOfflinePlayer(targetName);
             if (target.getName() == null) {
-                event.getMessage().reply("❌ Игрок с ником `" + targetName + "` не найден.").queue();
+                event.getMessage().reply("❌ Игрок не найден.").queue();
                 return;
             }
 
@@ -310,8 +600,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 String label = (String) fieldMap.get("label");
                 String placeholder = (String) fieldMap.get("placeholder");
                 boolean inline = fieldMap.containsKey("inline") && (boolean) fieldMap.get("inline");
-                String value = plugin.getFieldValue(target, placeholder);
-                embed.addField(emoji + " " + label, value, inline);
+                embed.addField(emoji + " " + label, plugin.getFieldValue(target, placeholder), inline);
             }
             embed.setFooter("Запрошено через Discord бота");
             event.getMessage().replyEmbeds(embed.build()).queue();
@@ -327,15 +616,14 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             String componentId = event.getComponentId();
 
             if (componentId.startsWith("2fa_confirm_") && plugin.twoFactorEnabled) {
-                UUID uuid = UUID.fromString(componentId.substring(12));
-                plugin.handleConfirmButton(event, uuid);
+                plugin.handleConfirmButton(event, UUID.fromString(componentId.substring(12)));
                 return;
             }
 
             String msgId = event.getMessageId();
             TopState state = plugin.topStates.get(msgId);
             if (state == null) {
-                event.reply("⏳ Это сообщение устарело. Вызовите `!top` снова.").setEphemeral(true).queue();
+                event.reply("⏳ Сообщение устарело. Вызовите `!top` снова.").setEphemeral(true).queue();
                 return;
             }
 
@@ -344,12 +632,10 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 state.page = 0;
             } else if (componentId.startsWith("top_page_")) {
                 String[] parts = componentId.substring(9).split("_");
-                String cat = parts[0];
-                int newPage = Integer.parseInt(parts[1]);
-                if (cat.equals(state.category)) state.page = newPage;
+                if (parts[0].equals(state.category)) state.page = Integer.parseInt(parts[1]);
             }
-            MessageEmbed newEmbed = plugin.buildTopEmbed(state.category, state.page);
-            event.editMessageEmbeds(newEmbed).setComponents(plugin.buildTopButtons(state.category, state.page)).queue();
+            event.editMessageEmbeds(plugin.buildTopEmbed(state.category, state.page))
+                    .setComponents(plugin.buildTopButtons(state.category, state.page)).queue();
         }
     }
 
@@ -358,4 +644,12 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private static class TopState { String category; int page; TopState(String c, int p) { category = c; page = p; } }
     private static class SessionInfo { String ip; long expiry; SessionInfo(String i, long e) { ip = i; expiry = e; } }
     private static class PendingVerification { String ip; long timestamp; PendingVerification(String i, long t) { ip = i; timestamp = t; } }
+    private static class Achievement {
+        String id, label, placeholder, roleId;
+        long threshold;
+        Achievement(String id, String label, String placeholder, long threshold, String roleId) {
+            this.id = id; this.label = label; this.placeholder = placeholder;
+            this.threshold = threshold; this.roleId = roleId;
+        }
+    }
 }
