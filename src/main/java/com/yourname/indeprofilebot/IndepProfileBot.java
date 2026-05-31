@@ -481,6 +481,13 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 if (deaths > 0 && mins > 0) return String.format("%.0f мин.", (double) mins / deaths);
                 else return "∞";
             }
+            case "_playtime_": {
+                long totalMinutes = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_play_one_minute%"));
+                long hours = totalMinutes / 60;
+                long minutes = totalMinutes % 60;
+                if (hours > 0) return String.format("%d ч %d мин", hours, minutes);
+                else return String.format("%d мин", minutes);
+            }
             case "_distance_m_": {
                 long cm = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_walk_one_cm%"));
                 if (cm >= 100000) return String.format("%.1f км", cm / 100000.0);
@@ -502,12 +509,19 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         Map<String, Long> scores = new HashMap<>();
         Map<String, String> formattedValues = new HashMap<>();
 
+        // Собираем уникальные ники, чтобы исключить дубликаты
+        Set<String> uniqueNames = new HashSet<>();
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
+            if (p.getName() != null) uniqueNames.add(p.getName());
+        }
+
+        for (String name : uniqueNames) {
+            OfflinePlayer p = Bukkit.getOfflinePlayer(name);
             if (p.getName() == null) continue;
             String rawValue = getFieldValue(p, placeholder);
             long numeric = parseStatistic(rawValue);
-            scores.put(p.getName(), numeric);
-            formattedValues.put(p.getName(), formatCategoryValue(categoryKey, rawValue, numeric));
+            scores.put(name, numeric);
+            formattedValues.put(name, formatCategoryValue(categoryKey, rawValue, numeric));
         }
 
         return scores.entrySet().stream()
