@@ -18,7 +18,7 @@ sync-on-join:
 profile-fields:
   - emoji: "⏳"
     label: "Наиграно"
-    placeholder: "statistic_time_played"
+    placeholder: "_playtime_"
     inline: true
   - emoji: "⚔️"
     label: "Убито мобов"
