@@ -13,6 +13,7 @@ import net.dv8tion.jda.api.interactions.components.ActionRow;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -92,6 +93,10 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         verificationTimeoutMinutes = getConfig().getInt("two-factor-auth.verification-timeout-minutes", 5);
         linkKickMessage = getConfig().getString("two-factor-auth.link-kick-message", "");
         verifyKickMessage = getConfig().getString("two-factor-auth.verify-kick-message", "");
+
+        // Цвета через &
+        linkKickMessage = ChatColor.translateAlternateColorCodes('&', linkKickMessage);
+        verifyKickMessage = ChatColor.translateAlternateColorCodes('&', verifyKickMessage);
 
         guildId = getConfig().getString("guild-id", "");
         playerRoleId = getConfig().getString("player-role-id", "");
@@ -173,7 +178,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         if (jda != null) jda.shutdown();
     }
 
-    // ==================== Проверка прав ====================
     private boolean canModifyMember(Member member) {
         if (member == null) return false;
         Guild guild = member.getGuild();
@@ -187,7 +191,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         return true;
     }
 
-    // ==================== Синхронизация при входе ====================
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
@@ -220,7 +223,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
-    // ==================== Достижения ====================
     private void checkAchievements(Player player) {
         UUID uuid = player.getUniqueId();
         List<String> earned = achievementsConfig.getStringList(uuid.toString());
@@ -260,7 +262,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
-    // ==================== Рекорды ====================
     private void updateRecordsMessage() {
         if (recordsChannelId.isEmpty()) return;
         GuildMessageChannel channel = jda.getChannelById(GuildMessageChannel.class, recordsChannelId);
@@ -324,7 +325,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
-    // ==================== 2FA ====================
     @EventHandler
     public void onPlayerPreLogin(AsyncPlayerPreLoginEvent event) {
         if (!twoFactorEnabled) return;
@@ -381,6 +381,16 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             uuid = UUID.fromString(uuidStr);
         }
         String discordId = event.getAuthor().getId();
+
+        // Проверка на повторную привязку
+        for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
+            if (entry.getValue().equals(discordId)) {
+                String existingName = Bukkit.getOfflinePlayer(entry.getKey()).getName();
+                event.getMessage().reply("❌ Ваш Discord уже привязан к аккаунту `" + existingName + "`. Сначала отвяжите его командой `!unlink`.").queue();
+                return;
+            }
+        }
+
         linkedAccounts.put(uuid, discordId);
         linkedConfig.set(uuid.toString(), discordId);
         try { linkedConfig.save(linkedFile); } catch (IOException e) { getLogger().warning("Ошибка сохранения linked.yml"); }
@@ -399,6 +409,13 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         if (uuidToRemove == null) {
             event.getMessage().reply("❌ Ваш Discord не привязан ни к одному аккаунту.").queue();
             return;
+        }
+
+        // Кикаем игрока, если он онлайн
+        Player onlinePlayer = Bukkit.getPlayer(uuidToRemove);
+        if (onlinePlayer != null && onlinePlayer.isOnline()) {
+            onlinePlayer.kickPlayer(ChatColor.RED + "Ваш Discord-аккаунт был отвязан.\n" +
+                    ChatColor.WHITE + "Перезайдите и привяжите новый аккаунт.");
         }
 
         linkedAccounts.remove(uuidToRemove);
@@ -447,7 +464,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         event.editMessage("✅ Вход подтверждён. Можете зайти на сервер.").setComponents().queue();
     }
 
-    // ==================== Общие хелперы ====================
     private long parseStatistic(String raw) {
         if (raw == null) return 0;
         String cleaned = raw.replaceAll("[^0-9]", "");
@@ -481,13 +497,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 if (deaths > 0 && mins > 0) return String.format("%.0f мин.", (double) mins / deaths);
                 else return "∞";
             }
-            case "_playtime_": {
-                long totalMinutes = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_play_one_minute%"));
-                long hours = totalMinutes / 60;
-                long minutes = totalMinutes % 60;
-                if (hours > 0) return String.format("%d ч %d мин", hours, minutes);
-                else return String.format("%d мин", minutes);
-            }
             case "_distance_m_": {
                 long cm = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_walk_one_cm%"));
                 if (cm >= 100000) return String.format("%.1f км", cm / 100000.0);
@@ -505,21 +514,37 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
+    private OfflinePlayer findOfflinePlayer(String name) {
+        OfflinePlayer target = Bukkit.getOfflinePlayer(name);
+        if (target.getName() != null) return target;
+        // Пробуем точку (Floodgate)
+        target = Bukkit.getOfflinePlayer("." + name);
+        if (target.getName() != null) return target;
+        // Пробуем звёздочку
+        target = Bukkit.getOfflinePlayer("*" + name);
+        if (target.getName() != null) return target;
+        return null;
+    }
+
     private List<Map.Entry<String, String>> getTopForCategoryFormatted(String placeholder, String categoryKey) {
         Map<String, Long> scores = new HashMap<>();
         Map<String, String> formattedValues = new HashMap<>();
 
-        // Собираем уникальные ники, чтобы исключить дубликаты
         Set<String> uniqueNames = new HashSet<>();
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
             if (p.getName() != null) uniqueNames.add(p.getName());
         }
 
         for (String name : uniqueNames) {
-            OfflinePlayer p = Bukkit.getOfflinePlayer(name);
-            if (p.getName() == null) continue;
+            OfflinePlayer p = findOfflinePlayer(name);
+            if (p == null) continue;
             String rawValue = getFieldValue(p, placeholder);
-            long numeric = parseStatistic(rawValue);
+            long numeric;
+            if (placeholder.equals("statistic_time_played")) {
+                numeric = parsePlaytimeToMinutes(rawValue);
+            } else {
+                numeric = parseStatistic(rawValue);
+            }
             scores.put(name, numeric);
             formattedValues.put(name, formatCategoryValue(categoryKey, rawValue, numeric));
         }
@@ -528,6 +553,24 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                 .map(e -> new AbstractMap.SimpleEntry<>(e.getKey(), formattedValues.get(e.getKey())))
                 .collect(Collectors.toList());
+    }
+
+    private long parsePlaytimeToMinutes(String raw) {
+        if (raw == null || raw.isEmpty()) return 0;
+        raw = raw.toLowerCase().replaceAll("\\s+", "");
+        long total = 0;
+        try {
+            if (raw.contains("h")) {
+                String[] parts = raw.split("h");
+                total += Long.parseLong(parts[0]) * 60;
+                if (parts.length > 1) raw = parts[1]; else raw = "";
+            }
+            if (raw.contains("m")) {
+                String[] parts = raw.split("m");
+                total += Long.parseLong(parts[0]);
+            }
+        } catch (NumberFormatException e) { return 0; }
+        return total;
     }
 
     private MessageEmbed buildTopEmbed(String categoryKey, int page) {
@@ -559,9 +602,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 if (numeric >= 100000) return String.format("%.1f км", numeric / 100000.0);
                 else return String.format("%.0f м", numeric / 100.0);
             case "playtime":
-                long hours = numeric / 60;
-                long mins = numeric % 60;
-                return String.format("%d ч %d мин", hours, mins);
+                return rawValue; // уже отформатировано
             default:
                 return rawValue;
         }
@@ -617,6 +658,40 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 return;
             }
 
+            if (lower.equals("!me")) {
+                String discordId = event.getAuthor().getId();
+                UUID playerUuid = null;
+                for (Map.Entry<UUID, String> entry : plugin.linkedAccounts.entrySet()) {
+                    if (entry.getValue().equals(discordId)) {
+                        playerUuid = entry.getKey();
+                        break;
+                    }
+                }
+                if (playerUuid == null) {
+                    event.getMessage().reply("❌ Ваш Discord не привязан к аккаунту Minecraft. Используйте `!link <код>`, полученный при входе на сервер.").queue();
+                    return;
+                }
+                OfflinePlayer target = Bukkit.getOfflinePlayer(playerUuid);
+                if (target.getName() == null) {
+                    event.getMessage().reply("❌ Не удалось найти ваш Minecraft-аккаунт.").queue();
+                    return;
+                }
+
+                EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
+                embed.setAuthor(target.getName(), null, "https://minotar.net/avatar/" + target.getName() + "/128");
+                embed.setThumbnail("https://minotar.net/avatar/" + target.getName() + "/128");
+                for (Map<?, ?> fieldMap : plugin.profileFields) {
+                    String emoji = (String) fieldMap.get("emoji");
+                    String label = (String) fieldMap.get("label");
+                    String placeholder = (String) fieldMap.get("placeholder");
+                    boolean inline = fieldMap.containsKey("inline") && (boolean) fieldMap.get("inline");
+                    embed.addField(emoji + " " + label, plugin.getFieldValue(target, placeholder), inline);
+                }
+                embed.setFooter("Запрошено через Discord бота");
+                event.getMessage().replyEmbeds(embed.build()).queue();
+                return;
+            }
+
             String[] prefixes = {"!profile ", "!p ", "!stats ", "!myprofile "};
             String targetName = null;
             for (String prefix : prefixes) {
@@ -632,8 +707,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 return;
             }
 
-            OfflinePlayer target = Bukkit.getOfflinePlayer(targetName);
-            if (target.getName() == null) {
+            OfflinePlayer target = plugin.findOfflinePlayer(targetName);
+            if (target == null || target.getName() == null) {
                 event.getMessage().reply("❌ Игрок не найден.").queue();
                 return;
             }
