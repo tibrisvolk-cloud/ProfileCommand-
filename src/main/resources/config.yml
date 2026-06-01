@@ -3,10 +3,9 @@ bot-token: "ВСТАВЬТЕ_ВАШ_ТОКЕН_БОТА"
 guild-id: "123456789012345678"
 player-role-id: "123456789012345678"
 
-# Роли, которые бот НЕ должен трогать (ID через запятую)
 excluded-roles:
-  - "123456789012345678"  # ID роли администратора
-  - "123456789012345679"  # ID роли модератора
+  - "123456789012345678"   # ID роли администратора
+  - "123456789012345679"   # ID роли модератора
 
 sync-on-join:
   nick: true
@@ -18,7 +17,7 @@ sync-on-join:
 profile-fields:
   - emoji: "⏳"
     label: "Наиграно"
-    placeholder: "_playtime_"
+    placeholder: "statistic_time_played"
     inline: true
   - emoji: "⚔️"
     label: "Убито мобов"
@@ -36,10 +35,6 @@ profile-fields:
     label: "Получено урона"
     placeholder: "statistic_damage_taken"
     inline: true
-  - emoji: "⏱️"
-    label: "Средняя жизнь"
-    placeholder: "_average_life_"
-    inline: true
   - emoji: "👣"
     label: "Пройдено"
     placeholder: "_distance_m_"
@@ -55,18 +50,6 @@ profile-fields:
   - emoji: "🔗"
     label: "Discord"
     placeholder: "_discord_"
-    inline: true
-  - emoji: ""
-    label: ""
-    placeholder: "_blank_"
-    inline: true
-  - emoji: "⚡"
-    label: "Эффективность"
-    placeholder: "_efficiency_"
-    inline: true
-  - emoji: ""
-    label: ""
-    placeholder: "_blank_"
     inline: true
 
 # ----------------------------
@@ -93,16 +76,10 @@ top-categories:
     placeholder: "statistic_traded_with_villager"
   distance:
     label: "👣 Пройдено"
-    placeholder: "_distance_m_"
-  efficiency:
-    label: "⚡ Эффективность"
-    placeholder: "_efficiency_"
+    placeholder: "statistic_walk_one_cm"       # сырые сантиметры
   playtime:
     label: "⏳ Время игры"
-    placeholder: "statistic_play_one_minute"
-  avg_life:
-    label: "⏱️ Средняя жизнь"
-    placeholder: "_average_life_"
+    placeholder: "statistic_time_played"       # парсим в минуты для сортировки
 
 top-page-size: 10
 
@@ -113,8 +90,8 @@ two-factor-auth:
   enabled: true
   session-duration-minutes: 1440
   verification-timeout-minutes: 5
-  link-kick-message: '{"text":"Привяжите Discord!\nВаш код: {CODE}\nОтправьте боту в ЛС: !link {CODE}","color":"red"}'
-  verify-kick-message: '{"text":"Подтвердите вход через Discord!\nБот отправил вам сообщение в ЛС.\nНажмите кнопку \"Подтвердить вход\".","color":"red"}'
+  link-kick-message: "&cПривяжите Discord!\n&fВаш код: &e{CODE}\n&fОтправьте боту в ЛС: &a!link {CODE}"
+  verify-kick-message: "&cПодтвердите вход через Discord!\n&fБот отправил вам сообщение в ЛС.\n&fНажмите кнопку \"Подтвердить вход\"."
 
 # ----------------------------
 # ДОСТИЖЕНИЯ
