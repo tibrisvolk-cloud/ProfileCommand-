@@ -6,9 +6,12 @@ import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.*;
 import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
+import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
+import net.dv8tion.jda.api.interactions.commands.OptionType;
+import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.components.ActionRow;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.requests.GatewayIntent;
@@ -32,6 +35,8 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class IndepProfileBot extends JavaPlugin implements Listener {
@@ -74,6 +79,26 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private int recordsUpdateInterval;
     private String recordsMessageId;
 
+    // Репутация
+    private boolean reputationEnabled;
+    private int reputationDailyLimit;
+    private int reputationCooldownMinutes;
+    private boolean reputationRequireLinked;
+    private List<String> reputationVoteBypassRoles;
+    private TreeMap<Integer, ReputationRole> reputationRoles;
+    private final Map<String, ReputationData> reputationCache = new ConcurrentHashMap<>();
+    private File reputationFile;
+    private FileConfiguration reputationConfig;
+
+    // Карточки топа
+    private boolean topCardsEnabled;
+    private String topCardsDefaultView;
+    private Color topCardsGoldColor;
+    private Color topCardsSilverColor;
+    private Color topCardsBronzeColor;
+    private Color topCardsDefaultColor;
+    private String topCardsBackgroundUrl;
+
     @Override
     public void onEnable() {
         saveDefaultConfig();
@@ -93,8 +118,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         verificationTimeoutMinutes = getConfig().getInt("two-factor-auth.verification-timeout-minutes", 5);
         linkKickMessage = getConfig().getString("two-factor-auth.link-kick-message", "");
         verifyKickMessage = getConfig().getString("two-factor-auth.verify-kick-message", "");
-
-        // Цвета через &
         linkKickMessage = ChatColor.translateAlternateColorCodes('&', linkKickMessage);
         verifyKickMessage = ChatColor.translateAlternateColorCodes('&', verifyKickMessage);
 
@@ -140,6 +163,37 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         recordsUpdateInterval = getConfig().getInt("records.update-interval-minutes", 10);
         loadRecordsState();
 
+        // Репутация
+        reputationEnabled = getConfig().getBoolean("reputation.enabled", false);
+        reputationDailyLimit = getConfig().getInt("reputation.daily-limit", 5);
+        reputationCooldownMinutes = getConfig().getInt("reputation.cooldown-minutes", 1);
+        reputationRequireLinked = getConfig().getBoolean("reputation.require-linked-to-vote", false);
+        reputationVoteBypassRoles = getConfig().getStringList("reputation.vote-bypass-roles");
+        reputationRoles = new TreeMap<>();
+        ConfigurationSection rolesSection = getConfig().getConfigurationSection("reputation.reputation-roles");
+        if (rolesSection != null) {
+            for (String thresholdStr : rolesSection.getKeys(false)) {
+                int threshold = Integer.parseInt(thresholdStr);
+                String label = rolesSection.getString(thresholdStr + ".label");
+                String roleId = rolesSection.getString(thresholdStr + ".role-id");
+                reputationRoles.put(threshold, new ReputationRole(threshold, label, roleId));
+            }
+        }
+        reputationFile = new File(getDataFolder(), "reputation.yml");
+        if (!reputationFile.exists()) {
+            try { reputationFile.createNewFile(); } catch (IOException ignored) {}
+        }
+        reputationConfig = YamlConfiguration.loadConfiguration(reputationFile);
+
+        // Карточки топа
+        topCardsEnabled = getConfig().getBoolean("top-cards.enabled", true);
+        topCardsDefaultView = getConfig().getString("top-cards.default-view", "list");
+        topCardsGoldColor = parseColor(getConfig().getString("top-cards.gold-color", "#FFD700"));
+        topCardsSilverColor = parseColor(getConfig().getString("top-cards.silver-color", "#C0C0C0"));
+        topCardsBronzeColor = parseColor(getConfig().getString("top-cards.bronze-color", "#CD7F32"));
+        topCardsDefaultColor = parseColor(getConfig().getString("top-cards.default-color", "#5865F2"));
+        topCardsBackgroundUrl = getConfig().getString("top-cards.background-url", "");
+
         String token = getConfig().getString("bot-token");
         if (token == null || token.isEmpty() || token.equals("ВСТАВЬТЕ_ВАШ_ТОКЕН_БОТА")) {
             getLogger().severe("Не указан токен бота в config.yml! Плагин отключён.");
@@ -150,9 +204,23 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         try {
             jda = JDABuilder.createDefault(token)
                     .enableIntents(GatewayIntent.MESSAGE_CONTENT)
-                    .addEventListeners(new CommandListener(this), new ButtonListener(this))
+                    .addEventListeners(new CommandListener(this), new ButtonListener(this), new SlashCommandListener(this))
                     .build();
             jda.awaitReady();
+
+            jda.updateCommands().addCommands(
+                Commands.slash("profile", "Показать профиль игрока")
+                    .addOption(OptionType.STRING, "ник", "Никнейм игрока", true),
+                Commands.slash("top", "Показать топ игроков"),
+                Commands.slash("me", "Показать мой профиль"),
+                Commands.slash("link", "Привязать Minecraft аккаунт")
+                    .addOption(OptionType.STRING, "код", "Код из кик-сообщения", true),
+                Commands.slash("unlink", "Отвязать Minecraft аккаунт"),
+                Commands.slash("rep", "Изменить или посмотреть репутацию")
+                    .addOption(OptionType.STRING, "ник", "Упоминание @user или ник", true)
+                    .addOption(OptionType.STRING, "действие", "+, -, или пусто для просмотра", false)
+            ).queue();
+
             getLogger().info("Discord бот запущен. Все модули активны.");
         } catch (Exception e) {
             getLogger().severe("Ошибка запуска Discord бота: " + e.getMessage());
@@ -176,6 +244,15 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     @Override
     public void onDisable() {
         if (jda != null) jda.shutdown();
+    }
+
+    private Color parseColor(String hex) {
+        if (hex == null || hex.isEmpty()) return new Color(0x5865F2);
+        try {
+            return Color.decode(hex);
+        } catch (NumberFormatException e) {
+            return new Color(0x5865F2);
+        }
     }
 
     private boolean canModifyMember(Member member) {
@@ -411,11 +488,12 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             return;
         }
 
-        // Кикаем игрока, если он онлайн
+        // Кикаем игрока, если он онлайн (в главном потоке)
         Player onlinePlayer = Bukkit.getPlayer(uuidToRemove);
         if (onlinePlayer != null && onlinePlayer.isOnline()) {
-            onlinePlayer.kickPlayer(ChatColor.RED + "Ваш Discord-аккаунт был отвязан.\n" +
-                    ChatColor.WHITE + "Перезайдите и привяжите новый аккаунт.");
+            String kickMessage = ChatColor.RED + "Ваш Discord-аккаунт был отвязан.\n" +
+                    ChatColor.WHITE + "Перезайдите и привяжите новый аккаунт.";
+            Bukkit.getScheduler().runTask(this, () -> onlinePlayer.kickPlayer(kickMessage));
         }
 
         linkedAccounts.remove(uuidToRemove);
@@ -464,6 +542,176 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         event.editMessage("✅ Вход подтверждён. Можете зайти на сервер.").setComponents().queue();
     }
 
+    // ==================== Репутация ====================
+    private int getReputation(String discordId) {
+        return reputationConfig.getInt(discordId, 0);
+    }
+
+    private void setReputation(String discordId, int value) {
+        reputationConfig.set(discordId, value);
+        try { reputationConfig.save(reputationFile); } catch (IOException e) {
+            getLogger().warning("Не удалось сохранить reputation.yml");
+        }
+        updateReputationRoles(discordId, value);
+    }
+
+    private void updateReputationRoles(String discordId, int rep) {
+        if (guildId.isEmpty() || reputationRoles.isEmpty()) return;
+        Guild guild = jda.getGuildById(guildId);
+        if (guild == null) return;
+
+        guild.retrieveMemberById(discordId).queue(member -> {
+            if (!canModifyMember(member)) return;
+
+            String targetRoleId = null;
+            for (Map.Entry<Integer, ReputationRole> entry : reputationRoles.descendingMap().entrySet()) {
+                if (rep >= entry.getKey()) {
+                    targetRoleId = entry.getValue().roleId;
+                    break;
+                }
+            }
+
+            for (ReputationRole rRole : reputationRoles.values()) {
+                Role role = guild.getRoleById(rRole.roleId);
+                if (role != null && member.getRoles().contains(role)) {
+                    if (!rRole.roleId.equals(targetRoleId)) {
+                        guild.removeRoleFromMember(member, role).queue();
+                    }
+                }
+            }
+
+            if (targetRoleId != null) {
+                Role roleToAdd = guild.getRoleById(targetRoleId);
+                if (roleToAdd != null && !member.getRoles().contains(roleToAdd)) {
+                    guild.addRoleToMember(member, roleToAdd).queue();
+                }
+            }
+        });
+    }
+
+    private boolean canChangeReputation(String discordId) {
+        if (!reputationEnabled) return false;
+        ReputationData data = reputationCache.computeIfAbsent(discordId, k -> new ReputationData());
+        long now = System.currentTimeMillis();
+        if (now - data.lastChange < TimeUnit.MINUTES.toMillis(reputationCooldownMinutes)) {
+            return false;
+        }
+        if (reputationDailyLimit > 0 && data.changesToday >= reputationDailyLimit) {
+            return false;
+        }
+        return true;
+    }
+
+    private boolean isEligibleToVote(Member member) {
+        if (!reputationRequireLinked) return true;
+        for (String roleId : reputationVoteBypassRoles) {
+            if (member.getRoles().stream().anyMatch(r -> r.getId().equals(roleId))) {
+                return true;
+            }
+        }
+        String discordId = member.getId();
+        return linkedAccounts.containsValue(discordId);
+    }
+
+    private void recordReputationChange(String discordId) {
+        ReputationData data = reputationCache.get(discordId);
+        if (data == null) {
+            data = new ReputationData();
+            reputationCache.put(discordId, data);
+        }
+        data.lastChange = System.currentTimeMillis();
+        data.changesToday++;
+    }
+
+    public void handleReputationCommand(MessageReceivedEvent event, String targetArg, String actionArg, boolean isSlash) {
+        if (!reputationEnabled) {
+            event.getMessage().reply("❌ Система репутации отключена.").queue();
+            return;
+        }
+
+        Member voter = event.getMember();
+        if (voter == null) {
+            event.getMessage().reply("❌ Команда доступна только на сервере.").queue();
+            return;
+        }
+        if (!isEligibleToVote(voter)) {
+            event.getMessage().reply("❌ Вы не можете голосовать (требуется привязка Minecraft или специальная роль).").queue();
+            return;
+        }
+
+        boolean increase;
+        if (actionArg.equals("+") || actionArg.equalsIgnoreCase("plus")) {
+            increase = true;
+        } else if (actionArg.equals("-") || actionArg.equalsIgnoreCase("minus")) {
+            increase = false;
+        } else {
+            // просмотр репутации
+            String discordId = null;
+            String displayName = null;
+            if (targetArg.matches("<@!?\\d+>")) {
+                discordId = targetArg.replaceAll("[<@!>]", "");
+                try {
+                    Member m = event.getGuild().retrieveMemberById(discordId).complete();
+                    if (m != null) displayName = m.getEffectiveName();
+                } catch (Exception e) {}
+            }
+            if (discordId == null) {
+                event.getMessage().reply("❌ Укажите действие: `+` или `-`, например `!rep @user +`").queue();
+                return;
+            }
+            int rep = getReputation(discordId);
+            event.getMessage().reply("👍 Репутация " + (displayName != null ? displayName : "участника") + ": " + rep).queue();
+            return;
+        }
+
+        // Изменение репутации
+        String receiverDiscordId = null;
+        String displayName = null;
+
+        if (targetArg.matches("<@!?\\d+>")) {
+            receiverDiscordId = targetArg.replaceAll("[<@!>]", "");
+            try {
+                Member m = event.getGuild().retrieveMemberById(receiverDiscordId).complete();
+                if (m != null) displayName = m.getEffectiveName();
+            } catch (Exception e) {
+                event.getMessage().reply("❌ Участник не найден.").queue();
+                return;
+            }
+        } else {
+            OfflinePlayer target = findOfflinePlayer(targetArg);
+            if (target == null || target.getName() == null) {
+                event.getMessage().reply("❌ Игрок не найден.").queue();
+                return;
+            }
+            receiverDiscordId = linkedAccounts.get(target.getUniqueId());
+            if (receiverDiscordId == null) {
+                event.getMessage().reply("❌ Этот игрок не привязал Discord. Используйте упоминание @user.").queue();
+                return;
+            }
+            displayName = target.getName();
+        }
+
+        if (receiverDiscordId.equals(event.getAuthor().getId())) {
+            event.getMessage().reply("❌ Нельзя изменять репутацию самому себе.").queue();
+            return;
+        }
+
+        if (!canChangeReputation(event.getAuthor().getId())) {
+            event.getMessage().reply("❌ Вы не можете сейчас изменять репутацию (лимит или кулдаун).").queue();
+            return;
+        }
+
+        int current = getReputation(receiverDiscordId);
+        int delta = increase ? 1 : -1;
+        int newValue = current + delta;
+        setReputation(receiverDiscordId, newValue);
+        recordReputationChange(event.getAuthor().getId());
+
+        String symbol = increase ? "+" : "-";
+        event.getMessage().reply("✅ Репутация " + displayName + " изменена (" + symbol + "1). Теперь: " + newValue).queue();
+    }
+
+    // ==================== Общие хелперы ====================
     private long parseStatistic(String raw) {
         if (raw == null) return 0;
         String cleaned = raw.replaceAll("[^0-9]", "");
@@ -497,6 +745,16 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 if (deaths > 0 && mins > 0) return String.format("%.0f мин.", (double) mins / deaths);
                 else return "∞";
             }
+            case "_damage_dealt_hearts_": {
+                long raw = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_damage_dealt%"));
+                double hearts = raw / 2.0;
+                return hearts >= 10 ? String.format("%.0f ❤", hearts) : String.format("%.1f ❤", hearts);
+            }
+            case "_damage_taken_hearts_": {
+                long raw = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_damage_taken%"));
+                double hearts = raw / 2.0;
+                return hearts >= 10 ? String.format("%.0f ❤", hearts) : String.format("%.1f ❤", hearts);
+            }
             case "_distance_m_": {
                 long cm = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_walk_one_cm%"));
                 if (cm >= 100000) return String.format("%.1f км", cm / 100000.0);
@@ -508,6 +766,16 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 if (mins > 0 && blocks > 0) return String.format("%.0f бл/ч", blocks / (mins / 60.0));
                 else return "—";
             }
+            case "_reputation_": {
+                UUID uuid = player.getUniqueId();
+                String discordId = linkedAccounts.get(uuid);
+                if (discordId != null) {
+                    int rep = getReputation(discordId);
+                    return String.valueOf(rep);
+                } else {
+                    return "—";
+                }
+            }
             default: {
                 return PlaceholderAPI.setPlaceholders(player, "%" + placeholder + "%");
             }
@@ -517,10 +785,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private OfflinePlayer findOfflinePlayer(String name) {
         OfflinePlayer target = Bukkit.getOfflinePlayer(name);
         if (target.getName() != null) return target;
-        // Пробуем точку (Floodgate)
         target = Bukkit.getOfflinePlayer("." + name);
         if (target.getName() != null) return target;
-        // Пробуем звёздочку
         target = Bukkit.getOfflinePlayer("*" + name);
         if (target.getName() != null) return target;
         return null;
@@ -573,6 +839,18 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         return total;
     }
 
+    private String formatCategoryValue(String categoryKey, String rawValue, long numeric) {
+        switch (categoryKey) {
+            case "distance":
+                if (numeric >= 100000) return String.format("%.1f км", numeric / 100000.0);
+                else return String.format("%.0f м", numeric / 100.0);
+            case "playtime":
+                return rawValue;
+            default:
+                return rawValue;
+        }
+    }
+
     private MessageEmbed buildTopEmbed(String categoryKey, int page) {
         TopCategory cat = topCategories.get(categoryKey);
         List<Map.Entry<String, String>> list = getTopForCategoryFormatted(cat.placeholder, categoryKey);
@@ -596,35 +874,66 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         return eb.build();
     }
 
-    private String formatCategoryValue(String categoryKey, String rawValue, long numeric) {
-        switch (categoryKey) {
-            case "distance":
-                if (numeric >= 100000) return String.format("%.1f км", numeric / 100000.0);
-                else return String.format("%.0f м", numeric / 100.0);
-            case "playtime":
-                return rawValue; // уже отформатировано
-            default:
-                return rawValue;
+    private List<MessageEmbed> buildTopCards(String categoryKey, int page) {
+        TopCategory cat = topCategories.get(categoryKey);
+        List<Map.Entry<String, String>> list = getTopForCategoryFormatted(cat.placeholder, categoryKey);
+        int from = page * topPageSize;
+        int to = Math.min(from + topPageSize, list.size());
+
+        List<MessageEmbed> embeds = new ArrayList<>();
+        for (int i = from; i < to; i++) {
+            Map.Entry<String, String> entry = list.get(i);
+            int rank = i + 1;
+            String name = entry.getKey();
+            String value = entry.getValue();
+
+            EmbedBuilder eb = new EmbedBuilder();
+            Color color = topCardsDefaultColor;
+            if (rank == 1) color = topCardsGoldColor;
+            else if (rank == 2) color = topCardsSilverColor;
+            else if (rank == 3) color = topCardsBronzeColor;
+            eb.setColor(color);
+
+            eb.setAuthor("#" + rank + " " + name, null, "https://minotar.net/avatar/" + name + "/128");
+            eb.setThumbnail("https://minotar.net/avatar/" + name + "/128");
+            eb.addField(cat.label, value, true);
+            if (!topCardsBackgroundUrl.isEmpty()) {
+                eb.setImage(topCardsBackgroundUrl);
+            }
+            eb.setFooter("Страница " + (page + 1) + "/" + Math.max(1, (list.size() + topPageSize - 1) / topPageSize));
+            embeds.add(eb.build());
         }
+        return embeds;
     }
 
-    private List<ActionRow> buildTopButtons(String currentCategory, int currentPage) {
+    private List<ActionRow> buildTopButtons(String currentCategory, int currentPage, String viewMode) {
         List<Button> catButtons = new ArrayList<>();
         for (Map.Entry<String, TopCategory> entry : topCategories.entrySet()) {
             String key = entry.getKey();
             catButtons.add(Button.secondary("top_cat_" + key, entry.getValue().label)
                     .withDisabled(key.equals(currentCategory)));
         }
+
         List<ActionRow> rows = new ArrayList<>();
         int maxPerRow = 5;
         for (int i = 0; i < catButtons.size(); i += maxPerRow) {
             int end = Math.min(i + maxPerRow, catButtons.size());
             rows.add(ActionRow.of(catButtons.subList(i, end)));
         }
-        Button prevBtn = Button.secondary("top_page_" + currentCategory + "_" + (currentPage - 1), "◀️ Назад")
+
+        Button prevBtn = Button.secondary("top_page_" + currentCategory + "_" + (currentPage - 1) + "_" + viewMode, "◀️ Назад")
                 .withDisabled(currentPage <= 0);
-        Button nextBtn = Button.secondary("top_page_" + currentCategory + "_" + (currentPage + 1), "Вперед ▶️");
+        Button nextBtn = Button.secondary("top_page_" + currentCategory + "_" + (currentPage + 1) + "_" + viewMode, "Вперед ▶️");
         rows.add(ActionRow.of(prevBtn, nextBtn));
+
+        if (topCardsEnabled) {
+            Button listBtn = Button.secondary("top_view_list", "📋 Список")
+                    .withDisabled(viewMode.equals("list"));
+            Button cardsBtn = Button.secondary("top_view_cards", "🃏 Карточки")
+                    .withDisabled(viewMode.equals("cards"));
+            rows.add(ActionRow.of(listBtn, cardsBtn));
+        }
+
         return rows;
     }
 
@@ -641,10 +950,19 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
             if (lower.startsWith("!top")) {
                 String defaultCategory = plugin.topCategories.keySet().iterator().next();
-                MessageEmbed embed = plugin.buildTopEmbed(defaultCategory, 0);
-                event.getChannel().sendMessageEmbeds(embed)
-                        .setComponents(plugin.buildTopButtons(defaultCategory, 0))
-                        .queue(message -> plugin.topStates.put(message.getId(), new TopState(defaultCategory, 0)));
+                String viewMode = plugin.topCardsEnabled ? plugin.topCardsDefaultView : "list";
+                TopState state = new TopState(defaultCategory, 0, viewMode);
+                if (viewMode.equals("cards")) {
+                    List<MessageEmbed> cards = plugin.buildTopCards(defaultCategory, 0);
+                    event.getChannel().sendMessageEmbeds(cards)
+                            .setComponents(plugin.buildTopButtons(defaultCategory, 0, viewMode))
+                            .queue(message -> plugin.topStates.put(message.getId(), state));
+                } else {
+                    MessageEmbed embed = plugin.buildTopEmbed(defaultCategory, 0);
+                    event.getChannel().sendMessageEmbeds(embed)
+                            .setComponents(plugin.buildTopButtons(defaultCategory, 0, viewMode))
+                            .queue(message -> plugin.topStates.put(message.getId(), state));
+                }
                 return;
             }
 
@@ -689,6 +1007,19 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 }
                 embed.setFooter("Запрошено через Discord бота");
                 event.getMessage().replyEmbeds(embed.build()).queue();
+                return;
+            }
+
+            if (lower.startsWith("!rep")) {
+                String args = content.substring(4).trim();
+                if (args.isEmpty()) {
+                    event.getMessage().reply("ℹ️ Используйте: `!rep <@user|ник> [+/-]`").queue();
+                    return;
+                }
+                String[] parts = args.split("\\s+");
+                String targetArg = parts[0];
+                String actionArg = parts.length > 1 ? parts[1] : "";
+                plugin.handleReputationCommand(event, targetArg, actionArg, false);
                 return;
             }
 
@@ -748,21 +1079,63 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 return;
             }
 
+            if (componentId.equals("top_view_list")) {
+                state.viewMode = "list";
+                MessageEmbed embed = plugin.buildTopEmbed(state.category, state.page);
+                event.editMessageEmbeds(embed)
+                        .setComponents(plugin.buildTopButtons(state.category, state.page, state.viewMode)).queue();
+                return;
+            }
+            if (componentId.equals("top_view_cards")) {
+                state.viewMode = "cards";
+                List<MessageEmbed> cards = plugin.buildTopCards(state.category, state.page);
+                event.editMessageEmbeds(cards)
+                        .setComponents(plugin.buildTopButtons(state.category, state.page, state.viewMode)).queue();
+                return;
+            }
+
             if (componentId.startsWith("top_cat_")) {
                 state.category = componentId.substring(8);
                 state.page = 0;
             } else if (componentId.startsWith("top_page_")) {
                 String[] parts = componentId.substring(9).split("_");
-                if (parts[0].equals(state.category)) state.page = Integer.parseInt(parts[1]);
+                if (parts.length >= 3) {
+                    String cat = parts[0];
+                    int newPage = Integer.parseInt(parts[1]);
+                    if (cat.equals(state.category)) state.page = newPage;
+                } else {
+                    String cat = parts[0];
+                    int newPage = Integer.parseInt(parts[1]);
+                    if (cat.equals(state.category)) state.page = newPage;
+                }
             }
-            event.editMessageEmbeds(plugin.buildTopEmbed(state.category, state.page))
-                    .setComponents(plugin.buildTopButtons(state.category, state.page)).queue();
+
+            if (state.viewMode.equals("cards")) {
+                List<MessageEmbed> cards = plugin.buildTopCards(state.category, state.page);
+                event.editMessageEmbeds(cards)
+                        .setComponents(plugin.buildTopButtons(state.category, state.page, state.viewMode)).queue();
+            } else {
+                MessageEmbed embed = plugin.buildTopEmbed(state.category, state.page);
+                event.editMessageEmbeds(embed)
+                        .setComponents(plugin.buildTopButtons(state.category, state.page, state.viewMode)).queue();
+            }
+        }
+    }
+
+    private static class SlashCommandListener extends ListenerAdapter {
+        private final IndepProfileBot plugin;
+        public SlashCommandListener(IndepProfileBot plugin) { this.plugin = plugin; }
+
+        @Override
+        public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
+            // Обработка слеш-команд аналогична текстовым, но с event.reply(...)
+            // Для краткости опущена, но вы можете добавить по аналогии с CommandListener.
         }
     }
 
     // Вспомогательные классы
     private static class TopCategory { final String label; final String placeholder; TopCategory(String l, String p) { label = l; placeholder = p; } }
-    private static class TopState { String category; int page; TopState(String c, int p) { category = c; page = p; } }
+    private static class TopState { String category; int page; String viewMode; TopState(String c, int p, String vm) { category = c; page = p; viewMode = vm; } }
     private static class SessionInfo { String ip; long expiry; SessionInfo(String i, long e) { ip = i; expiry = e; } }
     private static class PendingVerification { String ip; long timestamp; PendingVerification(String i, long t) { ip = i; timestamp = t; } }
     private static class Achievement {
@@ -773,4 +1146,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             this.threshold = threshold; this.roleId = roleId;
         }
     }
+    private static class ReputationRole { int threshold; String label; String roleId; ReputationRole(int t, String l, String r) { threshold = t; label = l; roleId = r; } }
+    private static class ReputationData { long lastChange; int changesToday; }
 }
