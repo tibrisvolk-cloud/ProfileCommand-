@@ -47,9 +47,13 @@ profile-fields:
     label: "Сделок с жителями"
     placeholder: "statistic_traded_with_villager"
     inline: true
-  - emoji: "👍"
-    label: "Репутация"
-    placeholder: "_reputation_"
+  - emoji: "⭐"
+    label: "Уровень"
+    placeholder: "_level_"
+    inline: true
+  - emoji: "✨"
+    label: "Опыт"
+    placeholder: "_xp_"
     inline: true
   - emoji: "🔗"
     label: "Discord"
@@ -80,27 +84,15 @@ top-categories:
     placeholder: "statistic_traded_with_villager"
   distance:
     label: "👣 Пройдено"
-    placeholder: "statistic_walk_one_cm"       # сырые сантиметры
+    placeholder: "statistic_walk_one_cm"
   playtime:
     label: "⏳ Время игры"
-    placeholder: "statistic_time_played"       # парсим в минуты
-  reputation:
-    label: "👍 Репутация"
-    placeholder: "_reputation_"
+    placeholder: "statistic_time_played"
+  level:
+    label: "⭐ Уровень"
+    placeholder: "_level_"
 
 top-page-size: 10
-
-# ----------------------------
-# КАРТОЧКИ ТОПА
-# ----------------------------
-top-cards:
-  enabled: true
-  default-view: "list"         # "list" или "cards"
-  gold-color: "#FFD700"
-  silver-color: "#C0C0C0"
-  bronze-color: "#CD7F32"
-  default-color: "#5865F2"
-  background-url: ""
 
 # ----------------------------
 # 2FA
@@ -143,22 +135,27 @@ records:
   update-interval-minutes: 10
 
 # ----------------------------
-# РЕПУТАЦИЯ
+# СИСТЕМА УРОВНЕЙ
 # ----------------------------
-reputation:
+levels:
   enabled: true
-  daily-limit: 5
-  cooldown-minutes: 1
-  require-linked-to-vote: true
-  vote-bypass-roles:
-    - "123456789012345678"   # ID роли администратора
-  reputation-roles:
-    50:
-      label: "Уважаемый"
-      role-id: "123456789012345679"
-    100:
-      label: "Легенда"
-      role-id: "123456789012345680"
-    200:
-      label: "Душа компании"
-      role-id: "123456789012345681"
+  text-xp:
+    enabled: true
+    channels: ["1234567890", "1234567891"]  # ID текстовых каналов
+    xp-per-message: 10
+    cooldown-seconds: 60
+    min-length: 8
+  voice-xp:
+    enabled: true
+    xp-per-minute: 5
+    check-interval-minutes: 5
+    exclude-afk: true
+    min-members: 2
+    multiplier-for-streaming: 1.5
+  level-formula:
+    base: 100
+    exponent: 2.0
+  level-roles:
+    5: "123456789012345678"   # Роль "Новичок"
+    10: "123456789012345679"  # Роль "Активист"
+    20: "123456789012345680"  # Роль "Легенда"
