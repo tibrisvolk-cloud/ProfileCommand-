@@ -588,7 +588,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 if (members.size() < levelConfig.voiceMinMembers) continue;
                 for (Member member : members) {
                     if (member.getUser().isBot()) continue;
-                    // Замена isAfk() на isSelfDeafened()
                     if (levelConfig.voiceExcludeAfk && member.getVoiceState() != null && member.getVoiceState().isSelfDeafened()) continue;
                     double multiplier = 1.0;
                     if (member.getVoiceState() != null && member.getVoiceState().isStream()) {
@@ -710,14 +709,21 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         Map<String, Long> scores = new HashMap<>();
         Map<String, String> formattedValues = new HashMap<>();
 
-        Set<String> uniqueNames = new HashSet<>();
+        // Собираем самых свежих игроков для каждого ника
+        Map<String, OfflinePlayer> latestPlayers = new HashMap<>();
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
-            if (p.getName() != null) uniqueNames.add(p.getName());
+            String name = p.getName();
+            if (name == null) continue;
+            if (name.startsWith(".") || name.startsWith("*")) continue;
+            OfflinePlayer existing = latestPlayers.get(name);
+            if (existing == null || p.getLastSeen() > existing.getLastSeen()) {
+                latestPlayers.put(name, p);
+            }
         }
 
-        for (String name : uniqueNames) {
-            OfflinePlayer p = findOfflinePlayer(name);
-            if (p == null) continue;
+        for (Map.Entry<String, OfflinePlayer> entry : latestPlayers.entrySet()) {
+            String name = entry.getKey();
+            OfflinePlayer p = entry.getValue();
             String rawValue = getFieldValue(p, placeholder);
             long numeric;
             if (placeholder.equals("statistic_time_played")) {
