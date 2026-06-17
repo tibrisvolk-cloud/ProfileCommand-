@@ -5,8 +5,8 @@ import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.*;
+import net.dv8tion.jda.api.entities.channel.concrete.VoiceChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
-import net.dv8tion.jda.api.entities.channel.middleman.VoiceChannel;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
@@ -385,7 +385,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
-    // ==================== 2FA ====================
     @EventHandler
     public void onPlayerPreLogin(AsyncPlayerPreLoginEvent event) {
         if (!twoFactorEnabled) return;
@@ -524,7 +523,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         event.editMessage("✅ Вход подтверждён. Можете зайти на сервер.").setComponents().queue();
     }
 
-    // ==================== Система уровней ====================
     private LevelData getLevelData(String discordId) {
         return levelCache.computeIfAbsent(discordId, k -> {
             LevelData data = new LevelData();
@@ -619,7 +617,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         saveLevelData(discordId, data);
     }
 
-    // ==================== Общие хелперы ====================
     private long parseStatistic(String raw) {
         if (raw == null) return 0;
         String cleaned = raw.replaceAll("[^0-9]", "");
@@ -810,7 +807,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         return rows;
     }
 
-    // ==================== Слушатели ====================
     private static class CommandListener extends ListenerAdapter {
         private final IndepProfileBot plugin;
         public CommandListener(IndepProfileBot plugin) { this.plugin = plugin; }
@@ -986,7 +982,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
-    // Вспомогательные классы
     private static class TopCategory { final String label; final String placeholder; TopCategory(String l, String p) { label = l; placeholder = p; } }
     private static class TopState { String category; int page; TopState(String c, int p) { category = c; page = p; } }
     private static class SessionInfo { String ip; long expiry; SessionInfo(String i, long e) { ip = i; expiry = e; } }
