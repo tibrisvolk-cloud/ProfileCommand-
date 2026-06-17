@@ -588,7 +588,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 if (members.size() < levelConfig.voiceMinMembers) continue;
                 for (Member member : members) {
                     if (member.getUser().isBot()) continue;
-                    if (levelConfig.voiceExcludeAfk && member.getVoiceState() != null && member.getVoiceState().isAfk()) continue;
+                    // Замена isAfk() на isSelfDeafened()
+                    if (levelConfig.voiceExcludeAfk && member.getVoiceState() != null && member.getVoiceState().isSelfDeafened()) continue;
                     double multiplier = 1.0;
                     if (member.getVoiceState() != null && member.getVoiceState().isStream()) {
                         multiplier = levelConfig.voiceStreamMultiplier;
