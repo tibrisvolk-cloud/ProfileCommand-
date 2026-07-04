@@ -31,8 +31,9 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 
 import java.awt.Color;
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -420,7 +421,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 EmbedBuilder eb = new EmbedBuilder();
                 eb.setColor(new Color(0x5865F2));
                 eb.setTitle("Подтверждение входа на сервер");
-                eb.setDescription("Кто-то пытается войти под вашим аккаунтом Minecraft.\nIP: " + ip +
+                String location = getLocationFromIp(ip);
+                eb.setDescription("Кто-то пытается войти под вашим аккаунтом Minecraft.\n📍 Локация: " + location +
                         "\nЕсли это вы, нажмите кнопку ниже.");
                 eb.setFooter("Запрос действителен 5 минут");
                 channel.sendMessageEmbeds(eb.build())
@@ -521,6 +523,39 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         sessions.put(uuid, new SessionInfo(pending.ip,
                 System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(sessionDurationMinutes)));
         event.editMessage("✅ Вход подтверждён. Можете зайти на сервер.").setComponents().queue();
+    }
+
+    private String getLocationFromIp(String ip) {
+        try {
+            URL url = new URL("http://ip-api.com/json/" + ip + "?fields=city,country");
+            HttpURLConnection con = (HttpURLConnection) url.openConnection();
+            con.setRequestMethod("GET");
+            con.setConnectTimeout(3000);
+            con.setReadTimeout(3000);
+
+            BufferedReader in = new BufferedReader(new InputStreamReader(con.getInputStream()));
+            String inputLine;
+            StringBuilder content = new StringBuilder();
+            while ((inputLine = in.readLine()) != null) {
+                content.append(inputLine);
+            }
+            in.close();
+            con.disconnect();
+
+            String json = content.toString();
+            String city = "неизвестно";
+            String country = "неизвестно";
+            if (json.contains("\"city\":")) {
+                city = json.split("\"city\":\"")[1].split("\"")[0];
+            }
+            if (json.contains("\"country\":")) {
+                country = json.split("\"country\":\"")[1].split("\"")[0];
+            }
+            return city + ", " + country;
+        } catch (Exception e) {
+            getLogger().warning("Не удалось определить локацию по IP " + ip + ": " + e.getMessage());
+            return "локация не определена";
+        }
     }
 
     private LevelData getLevelData(String discordId) {
@@ -651,14 +686,22 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 else return "∞";
             }
             case "_damage_dealt_hearts_": {
-                long raw = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_damage_dealt%"));
-                double hearts = raw / 2.0;
-                return hearts >= 10 ? String.format("%.0f ❤", hearts) : String.format("%.1f ❤", hearts);
+                try {
+                    long raw = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_damage_dealt%"));
+                    double hearts = raw / 2.0;
+                    return hearts >= 10 ? String.format("%.0f ❤", hearts) : String.format("%.1f ❤", hearts);
+                } catch (Exception e) {
+                    return "—";
+                }
             }
             case "_damage_taken_hearts_": {
-                long raw = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_damage_taken%"));
-                double hearts = raw / 2.0;
-                return hearts >= 10 ? String.format("%.0f ❤", hearts) : String.format("%.1f ❤", hearts);
+                try {
+                    long raw = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_damage_taken%"));
+                    double hearts = raw / 2.0;
+                    return hearts >= 10 ? String.format("%.0f ❤", hearts) : String.format("%.1f ❤", hearts);
+                } catch (Exception e) {
+                    return "—";
+                }
             }
             case "_distance_m_": {
                 long cm = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_walk_one_cm%"));
@@ -706,10 +749,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     }
 
     private List<Map.Entry<String, String>> getTopForCategoryFormatted(String placeholder, String categoryKey) {
-        Map<String, Long> scores = new HashMap<>();
-        Map<String, String> formattedValues = new HashMap<>();
-
-        // Собираем самых свежих игроков для каждого ника
         Map<String, OfflinePlayer> latestPlayers = new HashMap<>();
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
             String name = p.getName();
@@ -720,6 +759,9 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 latestPlayers.put(name, p);
             }
         }
+
+        Map<String, Long> scores = new HashMap<>();
+        Map<String, String> formattedValues = new HashMap<>();
 
         for (Map.Entry<String, OfflinePlayer> entry : latestPlayers.entrySet()) {
             String name = entry.getKey();
