@@ -525,6 +525,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         event.editMessage("✅ Вход подтверждён. Можете зайти на сервер.").setComponents().queue();
     }
 
+    // Убран IP из лога
     private String getLocationFromIp(String ip) {
         try {
             URL url = new URL("http://ip-api.com/json/" + ip + "?fields=city,country");
@@ -553,7 +554,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
             return city + ", " + country;
         } catch (Exception e) {
-            getLogger().warning("Не удалось определить локацию по IP " + ip + ": " + e.getMessage());
+            getLogger().warning("Не удалось определить локацию: " + e.getMessage());
             return "локация не определена";
         }
     }
@@ -955,10 +956,10 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 }
             }
 
-            sendProfileEmbed(event.getChannel(), target);
+            sendProfileEmbed(event.getChannel().asGuildMessageChannel(), target);
         }
 
-        private void sendProfileEmbed(MessageChannel channel, OfflinePlayer player) {
+        private void sendProfileEmbed(GuildMessageChannel channel, OfflinePlayer player) {
             EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
             embed.setAuthor(player.getName(), null, "https://minotar.net/avatar/" + player.getName() + "/128");
             embed.setThumbnail("https://minotar.net/avatar/" + player.getName() + "/128");
@@ -1010,13 +1011,12 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
             switch (event.getName()) {
                 case "profile":
-                    event.deferReply().queue(); // откладываем ответ, чтобы успеть обработать
+                    event.deferReply().queue();
                     String nick = event.getOption("ник").getAsString();
                     OfflinePlayer target = plugin.findOfflinePlayer(nick);
                     if (target == null) {
                         event.getHook().sendMessage("❌ Игрок не найден.").queue();
                     } else {
-                        // строим embed и отправляем
                         EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
                         embed.setAuthor(target.getName(), null, "https://minotar.net/avatar/" + target.getName() + "/128");
                         embed.setThumbnail("https://minotar.net/avatar/" + target.getName() + "/128");
