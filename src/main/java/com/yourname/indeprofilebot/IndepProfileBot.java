@@ -333,7 +333,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
         EmbedBuilder embed = new EmbedBuilder();
         embed.setColor(new Color(0xCD72DF));
-        embed.setTitle("🏆 Рекорды сервера за всё время:");
+        embed.setTitle("🏆 Рекорды сервера за всё время");
         if (!recordsImageUrl.isEmpty()) {
             embed.setImage(recordsImageUrl);
         }
