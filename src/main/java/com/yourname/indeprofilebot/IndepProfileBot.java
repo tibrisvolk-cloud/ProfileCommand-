@@ -193,7 +193,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         try {
             jda = JDABuilder.createDefault(token)
                     .enableIntents(GatewayIntent.MESSAGE_CONTENT, GatewayIntent.GUILD_VOICE_STATES)
-                    .addEventListeners(new CommandListener(this), new ButtonListener(this), new LevelListener(this))
+                    .addEventListeners(new CommandListener(this), new ButtonListener(this), new LevelListener(this), new SlashCommandListener(this))
                     .build();
             jda.awaitReady();
 
@@ -739,12 +739,23 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     }
 
     private OfflinePlayer findOfflinePlayer(String name) {
+        // 1. Точное совпадение
         OfflinePlayer target = Bukkit.getOfflinePlayer(name);
-        if (target.getName() != null) return target;
+        if (target.getName() != null && target.hasPlayedBefore()) return target;
+
+        // 2. Поиск без учёта регистра среди всех, кто заходил
+        for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
+            if (p.getName() != null && p.getName().equalsIgnoreCase(name) && p.hasPlayedBefore()) {
+                return p;
+            }
+        }
+
+        // 3. Floodgate-префиксы
         target = Bukkit.getOfflinePlayer("." + name);
-        if (target.getName() != null) return target;
+        if (target.getName() != null && target.hasPlayedBefore()) return target;
         target = Bukkit.getOfflinePlayer("*" + name);
-        if (target.getName() != null) return target;
+        if (target.getName() != null && target.hasPlayedBefore()) return target;
+
         return null;
     }
 
@@ -856,6 +867,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         return rows;
     }
 
+    // ================== Слушатели ====================
+
     private static class CommandListener extends ListenerAdapter {
         private final IndepProfileBot plugin;
         public CommandListener(IndepProfileBot plugin) { this.plugin = plugin; }
@@ -887,65 +900,12 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
 
             if (lower.equals("!me")) {
-                String discordId = event.getAuthor().getId();
-                UUID playerUuid = null;
-                for (Map.Entry<UUID, String> entry : plugin.linkedAccounts.entrySet()) {
-                    if (entry.getValue().equals(discordId)) {
-                        playerUuid = entry.getKey();
-                        break;
-                    }
-                }
-                if (playerUuid == null) {
-                    event.getMessage().reply("❌ Ваш Discord не привязан к аккаунту Minecraft. Используйте `!link <код>`, полученный при входе на сервер.").queue();
-                    return;
-                }
-                OfflinePlayer target = Bukkit.getOfflinePlayer(playerUuid);
-                if (target.getName() == null) {
-                    event.getMessage().reply("❌ Не удалось найти ваш Minecraft-аккаунт.").queue();
-                    return;
-                }
-
-                EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
-                embed.setAuthor(target.getName(), null, "https://minotar.net/avatar/" + target.getName() + "/128");
-                embed.setThumbnail("https://minotar.net/avatar/" + target.getName() + "/128");
-                for (Map<?, ?> fieldMap : plugin.profileFields) {
-                    String emoji = (String) fieldMap.get("emoji");
-                    String label = (String) fieldMap.get("label");
-                    String placeholder = (String) fieldMap.get("placeholder");
-                    boolean inline = fieldMap.containsKey("inline") && (boolean) fieldMap.get("inline");
-                    embed.addField(emoji + " " + label, plugin.getFieldValue(target, placeholder), inline);
-                }
-                embed.setFooter("Запрошено через Discord бота");
-                event.getMessage().replyEmbeds(embed.build()).queue();
+                showProfile(event, null, true);
                 return;
             }
 
             if (lower.equals("!rank") || lower.equals("!level")) {
-                if (!plugin.levelsEnabled) {
-                    event.getMessage().reply("❌ Система уровней отключена.").queue();
-                    return;
-                }
-                String discordId = event.getAuthor().getId();
-                LevelData data = plugin.getLevelData(discordId);
-                int nextLevelXp = plugin.getXpForLevel(data.level + 1);
-                int currentXp = data.xp;
-                double percent = (double) currentXp / nextLevelXp;
-                int bars = 10;
-                int filled = Math.min((int) (percent * bars), bars);
-                StringBuilder bar = new StringBuilder();
-                for (int i = 0; i < bars; i++) {
-                    bar.append(i < filled ? "🟦" : "⬜");
-                }
-
-                EmbedBuilder eb = new EmbedBuilder();
-                eb.setColor(new Color(0x5865F2));
-                eb.setAuthor(event.getAuthor().getEffectiveName(), null, event.getAuthor().getEffectiveAvatarUrl());
-                eb.setThumbnail(event.getAuthor().getEffectiveAvatarUrl());
-                eb.addField("⭐ Уровень " + data.level, bar.toString(), false);
-                eb.addField("✨ Опыт", currentXp + " / " + nextLevelXp + " XP (" + String.format("%.0f", percent * 100) + "%)", true);
-                eb.setFooter("Заработано в сообществе");
-
-                event.getMessage().replyEmbeds(eb.build()).queue();
+                showRank(event);
                 return;
             }
 
@@ -964,24 +924,184 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 return;
             }
 
-            OfflinePlayer target = plugin.findOfflinePlayer(targetName);
-            if (target == null || target.getName() == null) {
-                event.getMessage().reply("❌ Игрок не найден.").queue();
-                return;
+            showProfile(event, targetName, false);
+        }
+
+        private void showProfile(MessageReceivedEvent event, String targetName, boolean isSelf) {
+            OfflinePlayer target;
+            if (isSelf) {
+                String discordId = event.getAuthor().getId();
+                UUID playerUuid = null;
+                for (Map.Entry<UUID, String> entry : plugin.linkedAccounts.entrySet()) {
+                    if (entry.getValue().equals(discordId)) {
+                        playerUuid = entry.getKey();
+                        break;
+                    }
+                }
+                if (playerUuid == null) {
+                    event.getMessage().reply("❌ Ваш Discord не привязан к аккаунту Minecraft. Используйте `!link <код>`, полученный при входе на сервер.").queue();
+                    return;
+                }
+                target = Bukkit.getOfflinePlayer(playerUuid);
+                if (!target.hasPlayedBefore()) {
+                    event.getMessage().reply("❌ Ваш Minecraft-аккаунт не найден.").queue();
+                    return;
+                }
+            } else {
+                target = plugin.findOfflinePlayer(targetName);
+                if (target == null) {
+                    event.getMessage().reply("❌ Игрок не найден.").queue();
+                    return;
+                }
             }
 
+            sendProfileEmbed(event.getChannel(), target);
+        }
+
+        private void sendProfileEmbed(MessageChannel channel, OfflinePlayer player) {
             EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
-            embed.setAuthor(target.getName(), null, "https://minotar.net/avatar/" + target.getName() + "/128");
-            embed.setThumbnail("https://minotar.net/avatar/" + target.getName() + "/128");
+            embed.setAuthor(player.getName(), null, "https://minotar.net/avatar/" + player.getName() + "/128");
+            embed.setThumbnail("https://minotar.net/avatar/" + player.getName() + "/128");
             for (Map<?, ?> fieldMap : plugin.profileFields) {
                 String emoji = (String) fieldMap.get("emoji");
                 String label = (String) fieldMap.get("label");
                 String placeholder = (String) fieldMap.get("placeholder");
                 boolean inline = fieldMap.containsKey("inline") && (boolean) fieldMap.get("inline");
-                embed.addField(emoji + " " + label, plugin.getFieldValue(target, placeholder), inline);
+                embed.addField(emoji + " " + label, plugin.getFieldValue(player, placeholder), inline);
             }
             embed.setFooter("Запрошено через Discord бота");
-            event.getMessage().replyEmbeds(embed.build()).queue();
+            channel.sendMessageEmbeds(embed.build()).queue();
+        }
+
+        private void showRank(MessageReceivedEvent event) {
+            if (!plugin.levelsEnabled) {
+                event.getMessage().reply("❌ Система уровней отключена.").queue();
+                return;
+            }
+            String discordId = event.getAuthor().getId();
+            LevelData data = plugin.getLevelData(discordId);
+            int nextLevelXp = plugin.getXpForLevel(data.level + 1);
+            int currentXp = data.xp;
+            double percent = (double) currentXp / nextLevelXp;
+            int bars = 10;
+            int filled = Math.min((int) (percent * bars), bars);
+            StringBuilder bar = new StringBuilder();
+            for (int i = 0; i < bars; i++) {
+                bar.append(i < filled ? "🟦" : "⬜");
+            }
+
+            EmbedBuilder eb = new EmbedBuilder();
+            eb.setColor(new Color(0x5865F2));
+            eb.setAuthor(event.getAuthor().getEffectiveName(), null, event.getAuthor().getEffectiveAvatarUrl());
+            eb.setThumbnail(event.getAuthor().getEffectiveAvatarUrl());
+            eb.addField("⭐ Уровень " + data.level, bar.toString(), false);
+            eb.addField("✨ Опыт", currentXp + " / " + nextLevelXp + " XP (" + String.format("%.0f", percent * 100) + "%)", true);
+            eb.setFooter("Заработано в сообществе");
+
+            event.getMessage().replyEmbeds(eb.build()).queue();
+        }
+    }
+
+    private static class SlashCommandListener extends ListenerAdapter {
+        private final IndepProfileBot plugin;
+        public SlashCommandListener(IndepProfileBot plugin) { this.plugin = plugin; }
+
+        @Override
+        public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
+            switch (event.getName()) {
+                case "profile":
+                    event.deferReply().queue(); // откладываем ответ, чтобы успеть обработать
+                    String nick = event.getOption("ник").getAsString();
+                    OfflinePlayer target = plugin.findOfflinePlayer(nick);
+                    if (target == null) {
+                        event.getHook().sendMessage("❌ Игрок не найден.").queue();
+                    } else {
+                        // строим embed и отправляем
+                        EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
+                        embed.setAuthor(target.getName(), null, "https://minotar.net/avatar/" + target.getName() + "/128");
+                        embed.setThumbnail("https://minotar.net/avatar/" + target.getName() + "/128");
+                        for (Map<?, ?> fieldMap : plugin.profileFields) {
+                            String emoji = (String) fieldMap.get("emoji");
+                            String label = (String) fieldMap.get("label");
+                            String placeholder = (String) fieldMap.get("placeholder");
+                            boolean inline = fieldMap.containsKey("inline") && (boolean) fieldMap.get("inline");
+                            embed.addField(emoji + " " + label, plugin.getFieldValue(target, placeholder), inline);
+                        }
+                        embed.setFooter("Запрошено через слеш-команду");
+                        event.getHook().sendMessageEmbeds(embed.build()).queue();
+                    }
+                    break;
+                case "top":
+                    event.deferReply().queue();
+                    String defaultCategory = plugin.topCategories.keySet().iterator().next();
+                    MessageEmbed topEmbed = plugin.buildTopEmbed(defaultCategory, 0);
+                    event.getHook().sendMessageEmbeds(topEmbed)
+                            .addComponents(plugin.buildTopButtons(defaultCategory, 0))
+                            .queue();
+                    break;
+                case "me":
+                    event.deferReply().queue();
+                    String discordId = event.getUser().getId();
+                    UUID playerUuid = null;
+                    for (Map.Entry<UUID, String> entry : plugin.linkedAccounts.entrySet()) {
+                        if (entry.getValue().equals(discordId)) {
+                            playerUuid = entry.getKey();
+                            break;
+                        }
+                    }
+                    if (playerUuid == null) {
+                        event.getHook().sendMessage("❌ Ваш Discord не привязан к Minecraft. Используйте `!link <код>`.").queue();
+                    } else {
+                        OfflinePlayer self = Bukkit.getOfflinePlayer(playerUuid);
+                        if (!self.hasPlayedBefore()) {
+                            event.getHook().sendMessage("❌ Ваш Minecraft-аккаунт не найден.").queue();
+                        } else {
+                            EmbedBuilder selfEmbed = new EmbedBuilder().setColor(new Color(0x5865F2));
+                            selfEmbed.setAuthor(self.getName(), null, "https://minotar.net/avatar/" + self.getName() + "/128");
+                            selfEmbed.setThumbnail("https://minotar.net/avatar/" + self.getName() + "/128");
+                            for (Map<?, ?> fieldMap : plugin.profileFields) {
+                                String emoji = (String) fieldMap.get("emoji");
+                                String label = (String) fieldMap.get("label");
+                                String placeholder = (String) fieldMap.get("placeholder");
+                                boolean inline = fieldMap.containsKey("inline") && (boolean) fieldMap.get("inline");
+                                selfEmbed.addField(emoji + " " + label, plugin.getFieldValue(self, placeholder), inline);
+                            }
+                            selfEmbed.setFooter("Запрошено через слеш-команду");
+                            event.getHook().sendMessageEmbeds(selfEmbed.build()).queue();
+                        }
+                    }
+                    break;
+                case "rank":
+                    event.deferReply().queue();
+                    if (!plugin.levelsEnabled) {
+                        event.getHook().sendMessage("❌ Система уровней отключена.").queue();
+                    } else {
+                        String userId = event.getUser().getId();
+                        LevelData data = plugin.getLevelData(userId);
+                        int nextLevelXp = plugin.getXpForLevel(data.level + 1);
+                        int currentXp = data.xp;
+                        double percent = (double) currentXp / nextLevelXp;
+                        int bars = 10;
+                        int filled = Math.min((int) (percent * bars), bars);
+                        StringBuilder bar = new StringBuilder();
+                        for (int i = 0; i < bars; i++) {
+                            bar.append(i < filled ? "🟦" : "⬜");
+                        }
+                        EmbedBuilder rankEmbed = new EmbedBuilder();
+                        rankEmbed.setColor(new Color(0x5865F2));
+                        rankEmbed.setAuthor(event.getUser().getEffectiveName(), null, event.getUser().getEffectiveAvatarUrl());
+                        rankEmbed.setThumbnail(event.getUser().getEffectiveAvatarUrl());
+                        rankEmbed.addField("⭐ Уровень " + data.level, bar.toString(), false);
+                        rankEmbed.addField("✨ Опыт", currentXp + " / " + nextLevelXp + " XP (" + String.format("%.0f", percent * 100) + "%)", true);
+                        rankEmbed.setFooter("Заработано в сообществе");
+                        event.getHook().sendMessageEmbeds(rankEmbed.build()).queue();
+                    }
+                    break;
+                case "link":
+                case "unlink":
+                    event.reply("ℹ️ Пожалуйста, используйте текстовую команду `!link <код>` или `!unlink`.").setEphemeral(true).queue();
+                    break;
+            }
         }
     }
 
