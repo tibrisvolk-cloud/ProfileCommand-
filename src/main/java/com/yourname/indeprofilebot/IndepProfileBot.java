@@ -332,8 +332,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
 
         EmbedBuilder embed = new EmbedBuilder();
-        embed.setColor(new Color(0x5865F2));
-        embed.setTitle("🏆 Рекорды сервера за всё время");
+        embed.setColor(new Color(0xCD72DF));
+        embed.setTitle("🏆 Рекорды сервера за всё время:");
         if (!recordsImageUrl.isEmpty()) {
             embed.setImage(recordsImageUrl);
         }
@@ -419,10 +419,10 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         if (user != null) {
             user.openPrivateChannel().queue(channel -> {
                 EmbedBuilder eb = new EmbedBuilder();
-                eb.setColor(new Color(0x5865F2));
+                eb.setColor(new Color(0xCD72DF));
                 eb.setTitle("Подтверждение входа на сервер");
                 String location = getLocationFromIp(ip);
-                eb.setDescription("Кто-то пытается войти под вашим аккаунтом Minecraft.\n📍 Локация: " + location +
+                eb.setDescription("Кто-то пытается войти под вашим аккаунтом Minecraft.\n🌍 Локация: " + location +
                         "\nЕсли это вы, нажмите кнопку ниже.");
                 eb.setFooter("Запрос действителен 5 минут");
                 channel.sendMessageEmbeds(eb.build())
@@ -437,7 +437,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         synchronized (linkCodes) {
             String uuidStr = linkCodes.remove(code);
             if (uuidStr == null) {
-                event.getMessage().reply("❌ Неверный или устаревший код.").queue();
+                event.getMessage().reply("Неверный или устаревший код.").queue();
                 return;
             }
             uuid = UUID.fromString(uuidStr);
@@ -447,7 +447,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
             if (entry.getValue().equals(discordId)) {
                 String existingName = Bukkit.getOfflinePlayer(entry.getKey()).getName();
-                event.getMessage().reply("❌ Ваш Discord уже привязан к аккаунту `" + existingName + "`. Сначала отвяжите его командой `!unlink`.").queue();
+                event.getMessage().reply("Ваш Discord уже привязан к аккаунту `" + existingName + "`. Сначала отвяжите его командой `!unlink`.").queue();
                 return;
             }
         }
@@ -468,7 +468,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
         }
         if (uuidToRemove == null) {
-            event.getMessage().reply("❌ Ваш Discord не привязан ни к одному аккаунту.").queue();
+            event.getMessage().reply("Ваш Discord не привязан ни к одному аккаунту.").queue();
             return;
         }
 
@@ -502,7 +502,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 });
             }
         }
-        event.getMessage().reply("✅ Привязка удалена.").queue();
+        event.getMessage().reply("Привязка удалена.").queue();
     }
 
     public void handleConfirmButton(ButtonInteractionEvent event, UUID uuid) {
@@ -832,7 +832,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         int to = Math.min(from + topPageSize, list.size());
 
         EmbedBuilder eb = new EmbedBuilder();
-        eb.setColor(new Color(0x5865F2));
+        eb.setColor(new Color(0xE2DD60));
         eb.setTitle("🏆 Топ игроков: " + cat.label);
         if (list.isEmpty()) {
             eb.setDescription("Нет данных.");
@@ -997,7 +997,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             eb.setThumbnail(event.getAuthor().getEffectiveAvatarUrl());
             eb.addField("⭐ Уровень " + data.level, bar.toString(), false);
             eb.addField("✨ Опыт", currentXp + " / " + nextLevelXp + " XP (" + String.format("%.0f", percent * 100) + "%)", true);
-            eb.setFooter("Заработано в сообществе");
+            eb.setFooter("Заработано за общение");
 
             event.getMessage().replyEmbeds(eb.build()).queue();
         }
@@ -1093,7 +1093,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                         rankEmbed.setThumbnail(event.getUser().getEffectiveAvatarUrl());
                         rankEmbed.addField("⭐ Уровень " + data.level, bar.toString(), false);
                         rankEmbed.addField("✨ Опыт", currentXp + " / " + nextLevelXp + " XP (" + String.format("%.0f", percent * 100) + "%)", true);
-                        rankEmbed.setFooter("Заработано в сообществе");
+                        rankEmbed.setFooter("Заработано за общение");
                         event.getHook().sendMessageEmbeds(rankEmbed.build()).queue();
                     }
                     break;
