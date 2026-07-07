@@ -38,6 +38,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class IndepProfileBot extends JavaPlugin implements Listener {
 
@@ -635,7 +636,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 for (Member member : realMembers) {
                     if (member.getVoiceState() == null) continue;
                     if (levelConfig.voiceExcludeAfk && member.getVoiceState().isSelfDeafened()) continue;
-                    if (levelConfig.voiceRequireSpeakingStrict && !member.getVoiceState().isSpeaking()) continue;
+                    // Заменён isSpeaking() на проверку selfMuted
+                    if (levelConfig.voiceRequireSpeakingStrict && member.getVoiceState().isSelfMuted()) continue;
                     double multiplier = 1.0;
                     if (member.getVoiceState().isStream()) {
                         multiplier = levelConfig.voiceStreamMultiplier;
@@ -789,7 +791,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
         Map<String, Long> scores = new HashMap<>();
         Map<String, String> formattedValues = new HashMap<>();
-        // Для уровней собираем время последнего апа
         Map<String, Long> lastLevelUpTimes = new HashMap<>();
 
         for (Map.Entry<String, OfflinePlayer> entry : latestPlayers.entrySet()) {
@@ -816,14 +817,11 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
         }
 
-        // Сортировка
         Stream<Map.Entry<String, Long>> stream = scores.entrySet().stream();
         if (placeholder.equals("_level_")) {
-            // Сначала по уровню desc, потом по lastLevelUp asc (раньше апнул - выше)
             stream = stream.sorted(Map.Entry.<String, Long>comparingByValue().reversed()
                     .thenComparingLong(e -> lastLevelUpTimes.getOrDefault(e.getKey(), 0L)));
         } else {
-            // Остальные: по значению desc, потом по firstPlayed asc (старые игроки выше)
             stream = stream.sorted(Map.Entry.<String, Long>comparingByValue().reversed()
                     .thenComparingLong(e -> {
                         OfflinePlayer op = Bukkit.getOfflinePlayer(e.getKey());
