@@ -166,6 +166,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             levelConfig.voiceExcludeAfk = levelSec.getBoolean("voice-xp.exclude-afk", true);
             levelConfig.voiceMinMembers = levelSec.getInt("voice-xp.min-members", 2);
             levelConfig.voiceStreamMultiplier = levelSec.getDouble("voice-xp.multiplier-for-streaming", 1.5);
+            levelConfig.voiceRequireSpeakingStrict = levelSec.getBoolean("voice-xp.require-speaking-strict", false);
             levelConfig.base = levelSec.getInt("level-formula.base", 100);
             levelConfig.exponent = levelSec.getDouble("level-formula.exponent", 2.0);
             levelConfig.levelRoles = new HashMap<>();
@@ -525,7 +526,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         event.editMessage("✅ Вход подтверждён. Можете зайти на сервер.").setComponents().queue();
     }
 
-    // Убран IP из лога
     private String getLocationFromIp(String ip) {
         try {
             URL url = new URL("http://ip-api.com/json/" + ip + "?fields=city,country");
@@ -565,6 +565,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             data.xp = levelsConfig.getInt(k + ".xp", 0);
             data.level = levelsConfig.getInt(k + ".level", 1);
             data.lastTextXp = levelsConfig.getLong(k + ".lastTextXp", 0);
+            data.lastLevelUp = levelsConfig.getLong(k + ".lastLevelUp", 0);
             return data;
         });
     }
@@ -573,6 +574,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         levelsConfig.set(discordId + ".xp", data.xp);
         levelsConfig.set(discordId + ".level", data.level);
         levelsConfig.set(discordId + ".lastTextXp", data.lastTextXp);
+        levelsConfig.set(discordId + ".lastLevelUp", data.lastLevelUp);
         try { levelsConfig.save(levelsFile); } catch (IOException e) {
             getLogger().warning("Не удалось сохранить levels.yml");
         }
@@ -586,10 +588,15 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         LevelData data = getLevelData(discordId);
         data.xp += amount;
         int nextLevelXp = getXpForLevel(data.level + 1);
+        boolean leveledUp = false;
         while (data.xp >= nextLevelXp) {
             data.xp -= nextLevelXp;
             data.level++;
+            leveledUp = true;
             nextLevelXp = getXpForLevel(data.level + 1);
+        }
+        if (leveledUp) {
+            data.lastLevelUp = System.currentTimeMillis();
         }
         saveLevelData(discordId, data);
         checkLevelRoles(discordId, data.level);
@@ -620,13 +627,17 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         if (!levelsEnabled || !levelConfig.voiceXpEnabled) return;
         for (Guild guild : jda.getGuilds()) {
             for (VoiceChannel vc : guild.getVoiceChannels()) {
-                List<Member> members = vc.getMembers();
-                if (members.size() < levelConfig.voiceMinMembers) continue;
-                for (Member member : members) {
-                    if (member.getUser().isBot()) continue;
-                    if (levelConfig.voiceExcludeAfk && member.getVoiceState() != null && member.getVoiceState().isSelfDeafened()) continue;
+                List<Member> realMembers = vc.getMembers().stream()
+                        .filter(m -> !m.getUser().isBot())
+                        .collect(Collectors.toList());
+                if (realMembers.size() < levelConfig.voiceMinMembers) continue;
+
+                for (Member member : realMembers) {
+                    if (member.getVoiceState() == null) continue;
+                    if (levelConfig.voiceExcludeAfk && member.getVoiceState().isSelfDeafened()) continue;
+                    if (levelConfig.voiceRequireSpeakingStrict && !member.getVoiceState().isSpeaking()) continue;
                     double multiplier = 1.0;
-                    if (member.getVoiceState() != null && member.getVoiceState().isStream()) {
+                    if (member.getVoiceState().isStream()) {
                         multiplier = levelConfig.voiceStreamMultiplier;
                     }
                     addXp(member.getId(), (int) (levelConfig.voiceXpPerMinute * levelConfig.voiceCheckInterval * multiplier));
@@ -733,6 +744,13 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     return "—";
                 }
             }
+            case "_achievement_count_": {
+                UUID uuid = player.getUniqueId();
+                if (!achievementsEnabled) return "—";
+                List<String> earned = achievementsConfig.getStringList(uuid.toString());
+                int total = achievements.size();
+                return earned.size() + " / " + total;
+            }
             default: {
                 return PlaceholderAPI.setPlaceholders(player, "%" + placeholder + "%");
             }
@@ -740,18 +758,15 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     }
 
     private OfflinePlayer findOfflinePlayer(String name) {
-        // 1. Точное совпадение
         OfflinePlayer target = Bukkit.getOfflinePlayer(name);
         if (target.getName() != null && target.hasPlayedBefore()) return target;
 
-        // 2. Поиск без учёта регистра среди всех, кто заходил
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
             if (p.getName() != null && p.getName().equalsIgnoreCase(name) && p.hasPlayedBefore()) {
                 return p;
             }
         }
 
-        // 3. Floodgate-префиксы
         target = Bukkit.getOfflinePlayer("." + name);
         if (target.getName() != null && target.hasPlayedBefore()) return target;
         target = Bukkit.getOfflinePlayer("*" + name);
@@ -774,6 +789,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
         Map<String, Long> scores = new HashMap<>();
         Map<String, String> formattedValues = new HashMap<>();
+        // Для уровней собираем время последнего апа
+        Map<String, Long> lastLevelUpTimes = new HashMap<>();
 
         for (Map.Entry<String, OfflinePlayer> entry : latestPlayers.entrySet()) {
             String name = entry.getKey();
@@ -787,10 +804,34 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
             scores.put(name, numeric);
             formattedValues.put(name, formatCategoryValue(categoryKey, rawValue, numeric));
+
+            if (placeholder.equals("_level_")) {
+                String discordId = linkedAccounts.get(p.getUniqueId());
+                if (discordId != null) {
+                    LevelData data = getLevelData(discordId);
+                    lastLevelUpTimes.put(name, data.lastLevelUp);
+                } else {
+                    lastLevelUpTimes.put(name, 0L);
+                }
+            }
         }
 
-        return scores.entrySet().stream()
-                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+        // Сортировка
+        Stream<Map.Entry<String, Long>> stream = scores.entrySet().stream();
+        if (placeholder.equals("_level_")) {
+            // Сначала по уровню desc, потом по lastLevelUp asc (раньше апнул - выше)
+            stream = stream.sorted(Map.Entry.<String, Long>comparingByValue().reversed()
+                    .thenComparingLong(e -> lastLevelUpTimes.getOrDefault(e.getKey(), 0L)));
+        } else {
+            // Остальные: по значению desc, потом по firstPlayed asc (старые игроки выше)
+            stream = stream.sorted(Map.Entry.<String, Long>comparingByValue().reversed()
+                    .thenComparingLong(e -> {
+                        OfflinePlayer op = Bukkit.getOfflinePlayer(e.getKey());
+                        return op.getFirstPlayed();
+                    }));
+        }
+
+        return stream
                 .map(e -> new AbstractMap.SimpleEntry<>(e.getKey(), formattedValues.get(e.getKey())))
                 .collect(Collectors.toList());
     }
@@ -1164,7 +1205,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
     private static class LevelConfig {
-        boolean textXpEnabled, voiceXpEnabled, voiceExcludeAfk;
+        boolean textXpEnabled, voiceXpEnabled, voiceExcludeAfk, voiceRequireSpeakingStrict;
         List<String> textChannels;
         int textXpPerMessage, textCooldownSeconds, textMinLength, voiceXpPerMinute, voiceCheckInterval, voiceMinMembers;
         double voiceStreamMultiplier;
@@ -1175,5 +1216,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private static class LevelData {
         int xp, level;
         long lastTextXp;
+        long lastLevelUp;
     }
 }
