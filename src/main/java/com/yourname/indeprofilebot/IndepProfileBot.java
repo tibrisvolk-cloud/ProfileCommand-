@@ -22,6 +22,7 @@ import net.dv8tion.jda.api.requests.GatewayIntent;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.World;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -38,8 +39,6 @@ import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -678,31 +677,33 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         try { return Long.parseLong(cleaned); } catch (NumberFormatException e) { return 0; }
     }
 
-    // ----- НОВЫЙ МЕТОД ДЛЯ ПОДСЧЁТА АЧИВОК -----
+    // ----- МЕТОД ПОДСЧЁТА АЧИВОК С ДИАГНОСТИКОЙ -----
     private int getAdvancementCount(OfflinePlayer player) {
         UUID uuid = player.getUniqueId();
         int count = 0;
-        // Папки миров, где хранятся advancements
-        String[] worldNames = {"world", "world_nether", "world_the_end"};
-        File worldsDir = Bukkit.getWorldContainer(); // корень сервера
+        File worldsDir = Bukkit.getWorldContainer();
 
-        for (String worldName : worldNames) {
-            File advFile = new File(worldsDir, worldName + "/advancements/" + uuid + ".json");
-            if (!advFile.exists()) continue;
+        for (World world : Bukkit.getWorlds()) {
+            File advFile = new File(worldsDir, world.getName() + "/advancements/" + uuid + ".json");
+            if (!advFile.exists()) {
+                getLogger().warning("Advancements file not found: " + advFile.getAbsolutePath());
+                continue;
+            }
 
             try {
                 String content = new String(Files.readAllBytes(advFile.toPath()));
                 JsonObject root = JsonParser.parseString(content).getAsJsonObject();
-                if (root.has("done")) {
-                    JsonObject done = root.getAsJsonObject("done");
-                    for (Map.Entry<String, JsonElement> entry : done.entrySet()) {
-                        if (entry.getValue().getAsBoolean()) {
+                for (Map.Entry<String, JsonElement> entry : root.entrySet()) {
+                    JsonElement value = entry.getValue();
+                    if (value.isJsonObject()) {
+                        JsonObject advancement = value.getAsJsonObject();
+                        if (advancement.has("done") && advancement.get("done").getAsBoolean()) {
                             count++;
                         }
                     }
                 }
             } catch (Exception e) {
-                // файл повреждён или не JSON – пропускаем
+                getLogger().warning("Failed to parse advancements file: " + advFile.getAbsolutePath() + " - " + e.getMessage());
             }
         }
         return count;
@@ -788,7 +789,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 int total = achievements.size();
                 return earned.size() + " / " + total;
             }
-            // Замена плейсхолдеров ачивок на наш собственный подсчёт
+            // Ачивки – теперь всегда работают, даже для офлайн-игроков
             case "advancements_count":
             case "advancements_completed": {
                 int advCount = getAdvancementCount(player);
