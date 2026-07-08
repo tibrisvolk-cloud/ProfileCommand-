@@ -167,7 +167,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             levelConfig.voiceExcludeAfk = levelSec.getBoolean("voice-xp.exclude-afk", true);
             levelConfig.voiceMinMembers = levelSec.getInt("voice-xp.min-members", 2);
             levelConfig.voiceStreamMultiplier = levelSec.getDouble("voice-xp.multiplier-for-streaming", 1.5);
-            levelConfig.voiceRequireSpeakingStrict = levelSec.getBoolean("voice-xp.require-speaking-strict", false);
             levelConfig.base = levelSec.getInt("level-formula.base", 100);
             levelConfig.exponent = levelSec.getDouble("level-formula.exponent", 2.0);
             levelConfig.levelRoles = new HashMap<>();
@@ -636,8 +635,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 for (Member member : realMembers) {
                     if (member.getVoiceState() == null) continue;
                     if (levelConfig.voiceExcludeAfk && member.getVoiceState().isSelfDeafened()) continue;
-                    // Заменён isSpeaking() на проверку selfMuted
-                    if (levelConfig.voiceRequireSpeakingStrict && member.getVoiceState().isSelfMuted()) continue;
                     double multiplier = 1.0;
                     if (member.getVoiceState().isStream()) {
                         multiplier = levelConfig.voiceStreamMultiplier;
@@ -1203,7 +1200,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
     private static class LevelConfig {
-        boolean textXpEnabled, voiceXpEnabled, voiceExcludeAfk, voiceRequireSpeakingStrict;
+        boolean textXpEnabled, voiceXpEnabled, voiceExcludeAfk;
         List<String> textChannels;
         int textXpPerMessage, textCooldownSeconds, textMinLength, voiceXpPerMinute, voiceCheckInterval, voiceMinMembers;
         double voiceStreamMultiplier;
