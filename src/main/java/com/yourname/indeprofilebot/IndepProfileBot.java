@@ -1,5 +1,8 @@
 package com.yourname.indeprofilebot;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import me.clip.placeholderapi.PlaceholderAPI;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
@@ -34,6 +37,9 @@ import java.awt.Color;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -672,6 +678,36 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         try { return Long.parseLong(cleaned); } catch (NumberFormatException e) { return 0; }
     }
 
+    // ----- НОВЫЙ МЕТОД ДЛЯ ПОДСЧЁТА АЧИВОК -----
+    private int getAdvancementCount(OfflinePlayer player) {
+        UUID uuid = player.getUniqueId();
+        int count = 0;
+        // Папки миров, где хранятся advancements
+        String[] worldNames = {"world", "world_nether", "world_the_end"};
+        File worldsDir = Bukkit.getWorldContainer(); // корень сервера
+
+        for (String worldName : worldNames) {
+            File advFile = new File(worldsDir, worldName + "/advancements/" + uuid + ".json");
+            if (!advFile.exists()) continue;
+
+            try {
+                String content = new String(Files.readAllBytes(advFile.toPath()));
+                JsonObject root = JsonParser.parseString(content).getAsJsonObject();
+                if (root.has("done")) {
+                    JsonObject done = root.getAsJsonObject("done");
+                    for (Map.Entry<String, JsonElement> entry : done.entrySet()) {
+                        if (entry.getValue().getAsBoolean()) {
+                            count++;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                // файл повреждён или не JSON – пропускаем
+            }
+        }
+        return count;
+    }
+
     public String getFieldValue(OfflinePlayer player, String placeholder) {
         switch (placeholder) {
             case "_blank_": return "\u200B";
@@ -752,18 +788,11 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 int total = achievements.size();
                 return earned.size() + " / " + total;
             }
-            // Новые case для ванильных ачивок – обрабатываем офлайн-игроков
+            // Замена плейсхолдеров ачивок на наш собственный подсчёт
             case "advancements_count":
             case "advancements_completed": {
-                if (player.isOnline()) {
-                    try {
-                        String val = PlaceholderAPI.setPlaceholders(player, "%" + placeholder + "%");
-                        if (val != null && !val.equals("%" + placeholder + "%") && !val.equalsIgnoreCase("NO_WORKING")) {
-                            return val;
-                        }
-                    } catch (Exception ignored) {}
-                }
-                return "—";
+                int advCount = getAdvancementCount(player);
+                return String.valueOf(advCount);
             }
             default: {
                 String result = PlaceholderAPI.setPlaceholders(player, "%" + placeholder + "%");
