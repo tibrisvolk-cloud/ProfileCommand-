@@ -609,7 +609,9 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 guild.retrieveMemberById(discordId).queue(member -> {
                     if (!canModifyMember(member)) return;
                     for (Map.Entry<Integer, String> entry : levelConfig.levelRoles.entrySet()) {
-                        Role role = guild.getRoleById(entry.getValue());
+                        String roleId = entry.getValue();
+                        if (roleId == null || roleId.isEmpty()) continue;
+                        Role role = guild.getRoleById(roleId);
                         if (role != null) {
                             if (level >= entry.getKey() && !member.getRoles().contains(role)) {
                                 guild.addRoleToMember(member, role).queue();
@@ -750,8 +752,25 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 int total = achievements.size();
                 return earned.size() + " / " + total;
             }
+            // Новые case для ванильных ачивок – обрабатываем офлайн-игроков
+            case "advancements_count":
+            case "advancements_completed": {
+                if (player.isOnline()) {
+                    try {
+                        String val = PlaceholderAPI.setPlaceholders(player, "%" + placeholder + "%");
+                        if (val != null && !val.equals("%" + placeholder + "%") && !val.equalsIgnoreCase("NO_WORKING")) {
+                            return val;
+                        }
+                    } catch (Exception ignored) {}
+                }
+                return "—";
+            }
             default: {
-                return PlaceholderAPI.setPlaceholders(player, "%" + placeholder + "%");
+                String result = PlaceholderAPI.setPlaceholders(player, "%" + placeholder + "%");
+                if (result == null || result.equals("%" + placeholder + "%") || result.equalsIgnoreCase("NO_WORKING")) {
+                    return "—";
+                }
+                return result;
             }
         }
     }
