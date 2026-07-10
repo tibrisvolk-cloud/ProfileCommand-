@@ -677,23 +677,24 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         try { return Long.parseLong(cleaned); } catch (NumberFormatException e) { return 0; }
     }
 
-    // ----- МЕТОД ПОДСЧЁТА АЧИВОК С ДИАГНОСТИКОЙ -----
+    // ----- ИСПРАВЛЕННЫЙ МЕТОД ДЛЯ ПОДСЧЁТА АЧИВОК -----
     private int getAdvancementCount(OfflinePlayer player) {
         UUID uuid = player.getUniqueId();
+        if (uuid == null || uuid.toString().isEmpty()) return 0;
         int count = 0;
         File worldsDir = Bukkit.getWorldContainer();
 
         for (World world : Bukkit.getWorlds()) {
             File advFile = new File(worldsDir, world.getName() + "/advancements/" + uuid + ".json");
-            if (!advFile.exists()) {
-                getLogger().warning("Advancements file not found: " + advFile.getAbsolutePath());
-                continue;
-            }
+            if (!advFile.exists()) continue;
 
             try {
                 String content = new String(Files.readAllBytes(advFile.toPath()));
                 JsonObject root = JsonParser.parseString(content).getAsJsonObject();
-                for (Map.Entry<String, JsonElement> entry : root.entrySet()) {
+                JsonObject adv = root.getAsJsonObject("advancements");
+                if (adv == null) continue;
+
+                for (Map.Entry<String, JsonElement> entry : adv.entrySet()) {
                     JsonElement value = entry.getValue();
                     if (value.isJsonObject()) {
                         JsonObject advancement = value.getAsJsonObject();
@@ -702,9 +703,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                         }
                     }
                 }
-            } catch (Exception e) {
-                getLogger().warning("Failed to parse advancements file: " + advFile.getAbsolutePath() + " - " + e.getMessage());
-            }
+            } catch (Exception ignored) {}
         }
         return count;
     }
