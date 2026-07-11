@@ -677,7 +677,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         try { return Long.parseLong(cleaned); } catch (NumberFormatException e) { return 0; }
     }
 
-    // ----- ИСПРАВЛЕННЫЙ МЕТОД ДЛЯ ПОДСЧЁТА АЧИВОК -----
+    // ----- ФИНАЛЬНЫЙ МЕТОД ПОДСЧЁТА АЧИВОК -----
     private int getAdvancementCount(OfflinePlayer player) {
         UUID uuid = player.getUniqueId();
         if (uuid == null || uuid.toString().isEmpty()) return 0;
@@ -691,14 +691,15 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             try {
                 String content = new String(Files.readAllBytes(advFile.toPath()));
                 JsonObject root = JsonParser.parseString(content).getAsJsonObject();
-                JsonObject adv = root.getAsJsonObject("advancements");
-                if (adv == null) continue;
+                JsonObject source = root.has("advancements") ? root.getAsJsonObject("advancements") : root;
 
-                for (Map.Entry<String, JsonElement> entry : adv.entrySet()) {
+                for (Map.Entry<String, JsonElement> entry : source.entrySet()) {
                     JsonElement value = entry.getValue();
                     if (value.isJsonObject()) {
                         JsonObject advancement = value.getAsJsonObject();
-                        if (advancement.has("done") && advancement.get("done").getAsBoolean()) {
+                        if (advancement.has("display") &&
+                            advancement.has("done") &&
+                            advancement.get("done").getAsBoolean()) {
                             count++;
                         }
                     }
@@ -788,7 +789,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 int total = achievements.size();
                 return earned.size() + " / " + total;
             }
-            // Ачивки – теперь всегда работают, даже для офлайн-игроков
             case "advancements_count":
             case "advancements_completed": {
                 int advCount = getAdvancementCount(player);
