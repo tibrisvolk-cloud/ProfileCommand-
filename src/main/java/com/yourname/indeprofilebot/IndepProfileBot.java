@@ -706,37 +706,46 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             boolean prefixEnabled = levelConfig.minecraftPrefixEnabled;
             String prefixType = levelConfig.minecraftPrefixType != null ? levelConfig.minecraftPrefixType : "both";
 
-            // Все команды LuckPerms запускаем в главном потоке
+            // Последовательная отправка команд с задержкой
+            final int[] delay = {0}; // начальная задержка 0 тиков
             Bukkit.getScheduler().runTask(this, () -> {
                 for (Map.Entry<Integer, String> entry : levelConfig.minecraftGroups.entrySet()) {
                     int reqLevel = entry.getKey();
                     String group = entry.getValue();
                     if (level >= reqLevel) {
-                        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " parent set " + group);
-                        if (prefixEnabled) {
-                            String groupColor = levelConfig.minecraftGroupColors.getOrDefault(group, "&f");
-                            String prefixValue;
-                            switch (prefixType) {
-                                case "lvl":
-                                    prefixValue = "&d[LVL " + level + "] ";
-                                    break;
-                                case "group":
-                                    prefixValue = groupColor + "[" + group + "] ";
-                                    break;
-                                case "level":
-                                    prefixValue = "&d[" + level + "] ";
-                                    break;
-                                default: // both
-                                    prefixValue = groupColor + "[" + group + " &d" + level + groupColor + "] ";
-                                    break;
+                        // Устанавливаем группу и префикс с задержкой
+                        Bukkit.getScheduler().runTaskLater(this, () -> {
+                            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " parent set " + group);
+                            if (prefixEnabled) {
+                                String groupColor = levelConfig.minecraftGroupColors.getOrDefault(group, "&f");
+                                String prefixValue;
+                                switch (prefixType) {
+                                    case "lvl":
+                                        prefixValue = "&d[LVL " + level + "] ";
+                                        break;
+                                    case "group":
+                                        prefixValue = groupColor + "[" + group + "] ";
+                                        break;
+                                    case "level":
+                                        prefixValue = "&d[" + level + "] ";
+                                        break;
+                                    default: // both
+                                        prefixValue = groupColor + "[" + group + " &d" + level + groupColor + "] ";
+                                        break;
+                                }
+                                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " meta setprefix 100 " + prefixValue);
                             }
-                            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " meta setprefix 100 " + prefixValue);
-                        }
+                        }, delay[0]);
+                        delay[0] += 4; // увеличиваем задержку на 4 тика для следующей команды
                     } else {
-                        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " parent remove " + group);
-                        if (prefixEnabled) {
-                            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " meta removeprefix 100");
-                        }
+                        // Убираем группу и префикс с задержкой
+                        Bukkit.getScheduler().runTaskLater(this, () -> {
+                            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " parent remove " + group);
+                            if (prefixEnabled) {
+                                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " meta removeprefix 100");
+                            }
+                        }, delay[0]);
+                        delay[0] += 4;
                     }
                 }
             });
