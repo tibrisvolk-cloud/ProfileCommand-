@@ -677,7 +677,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         try { return Long.parseLong(cleaned); } catch (NumberFormatException e) { return 0; }
     }
 
-    // ----- ФИНАЛЬНЫЙ МЕТОД ПОДСЧЁТА АЧИВОК (БЕЗ РЕЦЕПТОВ) -----
+    // ----- ПОДСЧЁТ АЧИВОК (БЕЗ РЕЦЕПТОВ) -----
     private int getAdvancementCount(OfflinePlayer player) {
         UUID uuid = player.getUniqueId();
         if (uuid == null || uuid.toString().isEmpty()) return 0;
@@ -695,7 +695,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
                 for (Map.Entry<String, JsonElement> entry : source.entrySet()) {
                     String key = entry.getKey();
-                    // Пропускаем рецепты (они всегда содержат "recipes/")
                     if (key.contains("recipes/")) continue;
 
                     JsonElement value = entry.getValue();
@@ -795,6 +794,28 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             case "advancements_completed": {
                 int advCount = getAdvancementCount(player);
                 return String.valueOf(advCount);
+            }
+            // ----- БЫСТРЫЙ ПУТЬ ДЛЯ ДОБЫТЫХ БЛОКОВ -----
+            case "statistic_mine_block": {
+                UUID uuid = player.getUniqueId();
+                File statsFile = new File(Bukkit.getWorldContainer(), "world/stats/" + uuid + ".json");
+                if (!statsFile.exists()) return "0";
+                try {
+                    String content = new String(Files.readAllBytes(statsFile.toPath()));
+                    JsonObject root = JsonParser.parseString(content).getAsJsonObject();
+                    JsonObject stats = root.getAsJsonObject("stats");
+                    if (stats != null && stats.has("minecraft:mined")) {
+                        JsonObject mined = stats.getAsJsonObject("minecraft:mined");
+                        long total = 0;
+                        for (Map.Entry<String, JsonElement> entry : mined.entrySet()) {
+                            if (entry.getValue().isJsonPrimitive()) {
+                                total += entry.getValue().getAsLong();
+                            }
+                        }
+                        return String.valueOf(total);
+                    }
+                } catch (Exception ignored) {}
+                return "0";
             }
             default: {
                 String result = PlaceholderAPI.setPlaceholders(player, "%" + placeholder + "%");
