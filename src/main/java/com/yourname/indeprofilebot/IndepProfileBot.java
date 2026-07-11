@@ -706,40 +706,40 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             boolean prefixEnabled = levelConfig.minecraftPrefixEnabled;
             String prefixType = levelConfig.minecraftPrefixType != null ? levelConfig.minecraftPrefixType : "both";
 
-            for (Map.Entry<Integer, String> entry : levelConfig.minecraftGroups.entrySet()) {
-                int reqLevel = entry.getKey();
-                String group = entry.getValue();
-                if (level >= reqLevel) {
-                    // Устанавливаем группу
-                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " parent set " + group);
-
-                    if (prefixEnabled) {
-                        String groupColor = levelConfig.minecraftGroupColors.getOrDefault(group, "&f");
-                        String prefixValue;
-                        switch (prefixType) {
-                            case "lvl":
-                                prefixValue = "&d[LVL " + level + "] ";
-                                break;
-                            case "group":
-                                prefixValue = groupColor + "[" + group + "] ";
-                                break;
-                            case "level":
-                                prefixValue = "&d[" + level + "] ";
-                                break;
-                            default: // both
-                                prefixValue = groupColor + "[" + group + " &d" + level + groupColor + "] ";
-                                break;
+            // Все команды LuckPerms запускаем в главном потоке
+            Bukkit.getScheduler().runTask(this, () -> {
+                for (Map.Entry<Integer, String> entry : levelConfig.minecraftGroups.entrySet()) {
+                    int reqLevel = entry.getKey();
+                    String group = entry.getValue();
+                    if (level >= reqLevel) {
+                        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " parent set " + group);
+                        if (prefixEnabled) {
+                            String groupColor = levelConfig.minecraftGroupColors.getOrDefault(group, "&f");
+                            String prefixValue;
+                            switch (prefixType) {
+                                case "lvl":
+                                    prefixValue = "&d[LVL " + level + "] ";
+                                    break;
+                                case "group":
+                                    prefixValue = groupColor + "[" + group + "] ";
+                                    break;
+                                case "level":
+                                    prefixValue = "&d[" + level + "] ";
+                                    break;
+                                default: // both
+                                    prefixValue = groupColor + "[" + group + " &d" + level + groupColor + "] ";
+                                    break;
+                            }
+                            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " meta setprefix 100 " + prefixValue);
                         }
-                        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " meta setprefix 100 " + prefixValue);
-                    }
-                } else {
-                    // Убираем группу и сбрасываем префикс
-                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " parent remove " + group);
-                    if (prefixEnabled) {
-                        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " meta removeprefix 100");
+                    } else {
+                        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " parent remove " + group);
+                        if (prefixEnabled) {
+                            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " meta removeprefix 100");
+                        }
                     }
                 }
-            }
+            });
         }
     }
 
