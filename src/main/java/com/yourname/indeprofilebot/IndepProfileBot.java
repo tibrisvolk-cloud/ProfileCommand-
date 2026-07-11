@@ -29,6 +29,7 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -91,6 +92,13 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private final Map<String, LevelData> levelCache = new ConcurrentHashMap<>();
     private File levelsFile;
     private FileConfiguration levelsConfig;
+    
+    // Кулдаун для Minecraft чата
+    private final Map<UUID, Long> mcChatCooldown = new ConcurrentHashMap<>();
+
+    // Счётчики голосовой активности
+    private final Map<String, Integer> voiceUnmutedSamples = new ConcurrentHashMap<>();
+    private final Map<String, Integer> voiceTotalSamples = new ConcurrentHashMap<>();
 
     @Override
     public void onEnable() {
@@ -167,11 +175,17 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             levelConfig.textCooldownSeconds = levelSec.getInt("text-xp.cooldown-seconds", 60);
             levelConfig.textMinLength = levelSec.getInt("text-xp.min-length", 8);
             levelConfig.voiceXpEnabled = levelSec.getBoolean("voice-xp.enabled", false);
-            levelConfig.voiceXpPerMinute = levelSec.getInt("voice-xp.xp-per-minute", 5);
             levelConfig.voiceCheckInterval = levelSec.getInt("voice-xp.check-interval-minutes", 5);
             levelConfig.voiceExcludeAfk = levelSec.getBoolean("voice-xp.exclude-afk", true);
             levelConfig.voiceMinMembers = levelSec.getInt("voice-xp.min-members", 2);
             levelConfig.voiceStreamMultiplier = levelSec.getDouble("voice-xp.multiplier-for-streaming", 1.5);
+            levelConfig.voiceSampleIntervalSeconds = levelSec.getInt("voice-xp.sample-interval-seconds", 15);
+            levelConfig.voiceSpeakingXpPerMinute = levelSec.getInt("voice-xp.speaking-xp-per-minute", 5);
+            levelConfig.voiceMutedXpPerMinute = levelSec.getInt("voice-xp.muted-xp-per-minute", 1);
+            levelConfig.mcChatXpEnabled = levelSec.getBoolean("minecraft-chat-xp.enabled", false);
+            levelConfig.mcChatXpPerMessage = levelSec.getInt("minecraft-chat-xp.xp-per-message", 5);
+            levelConfig.mcChatCooldownSeconds = levelSec.getInt("minecraft-chat-xp.cooldown-seconds", 60);
+            levelConfig.mcChatMinLength = levelSec.getInt("minecraft-chat-xp.min-length", 4);
             levelConfig.base = levelSec.getInt("level-formula.base", 100);
             levelConfig.exponent = levelSec.getDouble("level-formula.exponent", 2.0);
             levelConfig.levelRoles = new HashMap<>();
@@ -181,6 +195,23 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     levelConfig.levelRoles.put(Integer.parseInt(levelStr), rolesSec.getString(levelStr));
                 }
             }
+            // Minecraft-группы и цвета
+            levelConfig.minecraftGroups = new HashMap<>();
+            ConfigurationSection mcGroupsSec = levelSec.getConfigurationSection("level-minecraft-groups");
+            if (mcGroupsSec != null) {
+                for (String levelStr : mcGroupsSec.getKeys(false)) {
+                    levelConfig.minecraftGroups.put(Integer.parseInt(levelStr), mcGroupsSec.getString(levelStr));
+                }
+            }
+            levelConfig.minecraftGroupColors = new HashMap<>();
+            ConfigurationSection colorsSec = levelSec.getConfigurationSection("minecraft-group-colors");
+            if (colorsSec != null) {
+                for (String group : colorsSec.getKeys(false)) {
+                    levelConfig.minecraftGroupColors.put(group, colorsSec.getString(group));
+                }
+            }
+            levelConfig.minecraftPrefixEnabled = levelSec.getBoolean("minecraft-prefix-enabled", true);
+            levelConfig.minecraftPrefixType = levelSec.getString("minecraft-prefix-type", "both");
 
             levelsFile = new File(getDataFolder(), "levels.yml");
             if (!levelsFile.exists()) {
@@ -234,6 +265,15 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
 
         if (levelsEnabled && levelConfig.voiceXpEnabled) {
+            // Опрос микрофонов
+            new BukkitRunnable() {
+                @Override
+                public void run() {
+                    sampleVoiceActivity();
+                }
+            }.runTaskTimer(this, 20L * 15, 20L * levelConfig.voiceSampleIntervalSeconds);
+
+            // Начисление голосового опыта
             new BukkitRunnable() {
                 @Override
                 public void run() {
@@ -290,6 +330,25 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
         if (achievementsEnabled) {
             checkAchievements(player);
+        }
+    }
+
+    @EventHandler
+    public void onPlayerChat(AsyncPlayerChatEvent event) {
+        if (!levelsEnabled || !levelConfig.mcChatXpEnabled) return;
+        Player player = event.getPlayer();
+        String message = event.getMessage();
+        if (message.length() < levelConfig.mcChatMinLength) return;
+        
+        UUID uuid = player.getUniqueId();
+        long now = System.currentTimeMillis();
+        Long last = mcChatCooldown.get(uuid);
+        if (last != null && (now - last) < TimeUnit.SECONDS.toMillis(levelConfig.mcChatCooldownSeconds)) return;
+        
+        mcChatCooldown.put(uuid, now);
+        String discordId = linkedAccounts.get(uuid);
+        if (discordId != null) {
+            addXp(discordId, levelConfig.mcChatXpPerMessage);
         }
     }
 
@@ -608,6 +667,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     }
 
     private void checkLevelRoles(String discordId, int level) {
+        // Discord-роли
         if (!guildId.isEmpty() && levelConfig.levelRoles != null) {
             Guild guild = jda.getGuildById(guildId);
             if (guild != null) {
@@ -628,9 +688,62 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 });
             }
         }
+
+        // Minecraft-группы и префиксы
+        if (levelConfig.minecraftGroups != null && !levelConfig.minecraftGroups.isEmpty()) {
+            UUID playerUuid = null;
+            for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
+                if (entry.getValue().equals(discordId)) {
+                    playerUuid = entry.getKey();
+                    break;
+                }
+            }
+            if (playerUuid == null) return;
+            OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(playerUuid);
+            if (offlinePlayer.getName() == null) return;
+
+            String playerName = offlinePlayer.getName();
+            boolean prefixEnabled = levelConfig.minecraftPrefixEnabled;
+            String prefixType = levelConfig.minecraftPrefixType != null ? levelConfig.minecraftPrefixType : "both";
+
+            for (Map.Entry<Integer, String> entry : levelConfig.minecraftGroups.entrySet()) {
+                int reqLevel = entry.getKey();
+                String group = entry.getValue();
+                if (level >= reqLevel) {
+                    // Устанавливаем группу
+                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " parent set " + group);
+
+                    if (prefixEnabled) {
+                        String groupColor = levelConfig.minecraftGroupColors.getOrDefault(group, "&f");
+                        String prefixValue;
+                        switch (prefixType) {
+                            case "lvl":
+                                prefixValue = "&d[LVL " + level + "] ";
+                                break;
+                            case "group":
+                                prefixValue = groupColor + "[" + group + "] ";
+                                break;
+                            case "level":
+                                prefixValue = "&d[" + level + "] ";
+                                break;
+                            default: // both
+                                prefixValue = groupColor + "[" + group + " &d" + level + groupColor + "] ";
+                                break;
+                        }
+                        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " meta setprefix 100 " + prefixValue);
+                    }
+                } else {
+                    // Убираем группу и сбрасываем префикс
+                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " parent remove " + group);
+                    if (prefixEnabled) {
+                        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " meta removeprefix 100");
+                    }
+                }
+            }
+        }
     }
 
-    private void awardVoiceXp() {
+    private void sampleVoiceActivity() {
         if (!levelsEnabled || !levelConfig.voiceXpEnabled) return;
         for (Guild guild : jda.getGuilds()) {
             for (VoiceChannel vc : guild.getVoiceChannels()) {
@@ -642,14 +755,46 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 for (Member member : realMembers) {
                     if (member.getVoiceState() == null) continue;
                     if (levelConfig.voiceExcludeAfk && member.getVoiceState().isSelfDeafened()) continue;
-                    double multiplier = 1.0;
-                    if (member.getVoiceState().isStream()) {
-                        multiplier = levelConfig.voiceStreamMultiplier;
+
+                    String id = member.getId();
+                    voiceTotalSamples.merge(id, 1, Integer::sum);
+                    if (!member.getVoiceState().isSelfMuted()) {
+                        voiceUnmutedSamples.merge(id, 1, Integer::sum);
                     }
-                    addXp(member.getId(), (int) (levelConfig.voiceXpPerMinute * levelConfig.voiceCheckInterval * multiplier));
                 }
             }
         }
+    }
+
+    private void awardVoiceXp() {
+        if (!levelsEnabled || !levelConfig.voiceXpEnabled) return;
+
+        for (Guild guild : jda.getGuilds()) {
+            for (VoiceChannel vc : guild.getVoiceChannels()) {
+                List<Member> realMembers = vc.getMembers().stream()
+                        .filter(m -> !m.getUser().isBot())
+                        .collect(Collectors.toList());
+                if (realMembers.size() < levelConfig.voiceMinMembers) continue;
+
+                for (Member member : realMembers) {
+                    String id = member.getId();
+                    int total = voiceTotalSamples.getOrDefault(id, 0);
+                    int unmuted = voiceUnmutedSamples.getOrDefault(id, 0);
+
+                    if (total > 0) {
+                        double speakingFraction = (double) unmuted / total;
+                        double xpPerMinute = levelConfig.voiceSpeakingXpPerMinute * speakingFraction
+                                + levelConfig.voiceMutedXpPerMinute * (1 - speakingFraction);
+                        if (member.getVoiceState() != null && member.getVoiceState().isStream()) {
+                            xpPerMinute *= levelConfig.voiceStreamMultiplier;
+                        }
+                        addXp(id, (int) (xpPerMinute * levelConfig.voiceCheckInterval));
+                    }
+                }
+            }
+        }
+        voiceTotalSamples.clear();
+        voiceUnmutedSamples.clear();
     }
 
     public void handleTextXp(MessageReceivedEvent event) {
@@ -1271,13 +1416,19 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
     private static class LevelConfig {
-        boolean textXpEnabled, voiceXpEnabled, voiceExcludeAfk;
+        boolean textXpEnabled, voiceXpEnabled, voiceExcludeAfk, mcChatXpEnabled;
         List<String> textChannels;
-        int textXpPerMessage, textCooldownSeconds, textMinLength, voiceXpPerMinute, voiceCheckInterval, voiceMinMembers;
+        int textXpPerMessage, textCooldownSeconds, textMinLength, voiceCheckInterval, voiceMinMembers, voiceSampleIntervalSeconds;
         double voiceStreamMultiplier;
+        int voiceSpeakingXpPerMinute, voiceMutedXpPerMinute;
+        int mcChatXpPerMessage, mcChatCooldownSeconds, mcChatMinLength;
         int base;
         double exponent;
         Map<Integer, String> levelRoles;
+        Map<Integer, String> minecraftGroups;
+        Map<String, String> minecraftGroupColors;
+        boolean minecraftPrefixEnabled;
+        String minecraftPrefixType;
     }
     private static class LevelData {
         int xp, level;
