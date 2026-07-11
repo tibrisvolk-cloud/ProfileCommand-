@@ -677,7 +677,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         try { return Long.parseLong(cleaned); } catch (NumberFormatException e) { return 0; }
     }
 
-    // ----- ВРЕМЕННЫЙ МЕТОД С ДИАГНОСТИКОЙ -----
+    // ----- ФИНАЛЬНЫЙ МЕТОД ПОДСЧЁТА АЧИВОК (БЕЗ РЕЦЕПТОВ) -----
     private int getAdvancementCount(OfflinePlayer player) {
         UUID uuid = player.getUniqueId();
         if (uuid == null || uuid.toString().isEmpty()) return 0;
@@ -690,32 +690,23 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
             try {
                 String content = new String(Files.readAllBytes(advFile.toPath()));
-                getLogger().info("=== ADVANCEMENTS JSON для " + player.getName() + " ===");
-                getLogger().info(content);
-                
                 JsonObject root = JsonParser.parseString(content).getAsJsonObject();
                 JsonObject source = root.has("advancements") ? root.getAsJsonObject("advancements") : root;
 
-                getLogger().info("Ключей в source: " + source.size());
-                
                 for (Map.Entry<String, JsonElement> entry : source.entrySet()) {
+                    String key = entry.getKey();
+                    // Пропускаем рецепты (они всегда содержат "recipes/")
+                    if (key.contains("recipes/")) continue;
+
                     JsonElement value = entry.getValue();
                     if (value.isJsonObject()) {
                         JsonObject advancement = value.getAsJsonObject();
-                        boolean done = advancement.has("done") && advancement.get("done").getAsBoolean();
-                        boolean hasDisplay = advancement.has("display");
-                        if (done) {
-                            getLogger().info("  [DONE] " + entry.getKey() + " | display=" + hasDisplay);
-                        }
-                        if (done && hasDisplay) {
+                        if (advancement.has("done") && advancement.get("done").getAsBoolean()) {
                             count++;
                         }
                     }
                 }
-                getLogger().info("Итого насчитано: " + count);
-            } catch (Exception e) {
-                getLogger().warning("Ошибка чтения файла " + advFile.getAbsolutePath() + ": " + e.getMessage());
-            }
+            } catch (Exception ignored) {}
         }
         return count;
     }
