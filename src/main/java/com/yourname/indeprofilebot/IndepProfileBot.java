@@ -186,6 +186,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             levelConfig.mcChatXpPerMessage = levelSec.getInt("minecraft-chat-xp.xp-per-message", 5);
             levelConfig.mcChatCooldownSeconds = levelSec.getInt("minecraft-chat-xp.cooldown-seconds", 60);
             levelConfig.mcChatMinLength = levelSec.getInt("minecraft-chat-xp.min-length", 4);
+            levelConfig.minecraftChatPrefixEnabled = levelSec.getBoolean("minecraft-chat-prefix-enabled", false);
+            levelConfig.minecraftChatPrefixFormat = levelSec.getString("minecraft-chat-prefix-format", "&d[LVL {level}] &r");
             levelConfig.base = levelSec.getInt("level-formula.base", 100);
             levelConfig.exponent = levelSec.getDouble("level-formula.exponent", 2.0);
             levelConfig.levelRoles = new HashMap<>();
@@ -195,23 +197,15 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     levelConfig.levelRoles.put(Integer.parseInt(levelStr), rolesSec.getString(levelStr));
                 }
             }
-            // Minecraft-группы и цвета
-            levelConfig.minecraftGroups = new TreeMap<>();
-            ConfigurationSection mcGroupsSec = levelSec.getConfigurationSection("level-minecraft-groups");
-            if (mcGroupsSec != null) {
-                for (String levelStr : mcGroupsSec.getKeys(false)) {
-                    levelConfig.minecraftGroups.put(Integer.parseInt(levelStr), mcGroupsSec.getString(levelStr));
+            // Награды за уровни
+            levelConfig.levelRewards = new HashMap<>();
+            ConfigurationSection rewardsSec = levelSec.getConfigurationSection("level-rewards");
+            if (rewardsSec != null) {
+                for (String levelStr : rewardsSec.getKeys(false)) {
+                    int lvl = Integer.parseInt(levelStr);
+                    levelConfig.levelRewards.put(lvl, rewardsSec.getStringList(levelStr));
                 }
             }
-            levelConfig.minecraftGroupColors = new HashMap<>();
-            ConfigurationSection colorsSec = levelSec.getConfigurationSection("minecraft-group-colors");
-            if (colorsSec != null) {
-                for (String group : colorsSec.getKeys(false)) {
-                    levelConfig.minecraftGroupColors.put(group, colorsSec.getString(group));
-                }
-            }
-            levelConfig.minecraftPrefixEnabled = levelSec.getBoolean("minecraft-prefix-enabled", true);
-            levelConfig.minecraftPrefixType = levelSec.getString("minecraft-prefix-type", "both");
 
             levelsFile = new File(getDataFolder(), "levels.yml");
             if (!levelsFile.exists()) {
@@ -331,10 +325,33 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         if (achievementsEnabled) {
             checkAchievements(player);
         }
+
+        // Выдача неполученных наград за уровни
+        if (levelsEnabled && levelConfig.levelRewards != null && !levelConfig.levelRewards.isEmpty()) {
+            String dId = linkedAccounts.get(uuid);
+            if (dId != null) {
+                grantRewards(player, dId);
+            }
+        }
     }
 
     @EventHandler
     public void onPlayerChat(AsyncPlayerChatEvent event) {
+        // Префикс уровня в чате
+        if (levelsEnabled && levelConfig.minecraftChatPrefixEnabled) {
+            Player player = event.getPlayer();
+            UUID uuid = player.getUniqueId();
+            String discordId = linkedAccounts.get(uuid);
+            if (discordId != null) {
+                LevelData data = getLevelData(discordId);
+                String format = levelConfig.minecraftChatPrefixFormat
+                        .replace("{level}", String.valueOf(data.level));
+                format = ChatColor.translateAlternateColorCodes('&', format);
+                event.setFormat(format + event.getFormat());
+            }
+        }
+
+        // Начисление опыта за Minecraft чат
         if (!levelsEnabled || !levelConfig.mcChatXpEnabled) return;
         Player player = event.getPlayer();
         String message = event.getMessage();
@@ -630,6 +647,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             data.level = levelsConfig.getInt(k + ".level", 1);
             data.lastTextXp = levelsConfig.getLong(k + ".lastTextXp", 0);
             data.lastLevelUp = levelsConfig.getLong(k + ".lastLevelUp", 0);
+            data.highestRewardClaimed = levelsConfig.getInt(k + ".highestRewardClaimed", 0);
             return data;
         });
     }
@@ -639,6 +657,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         levelsConfig.set(discordId + ".level", data.level);
         levelsConfig.set(discordId + ".lastTextXp", data.lastTextXp);
         levelsConfig.set(discordId + ".lastLevelUp", data.lastLevelUp);
+        levelsConfig.set(discordId + ".highestRewardClaimed", data.highestRewardClaimed);
         try { levelsConfig.save(levelsFile); } catch (IOException e) {
             getLogger().warning("Не удалось сохранить levels.yml");
         }
@@ -650,6 +669,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
     private void addXp(String discordId, int amount) {
         LevelData data = getLevelData(discordId);
+        int oldLevel = data.level;
         data.xp += amount;
         int nextLevelXp = getXpForLevel(data.level + 1);
         boolean leveledUp = false;
@@ -663,11 +683,49 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             data.lastLevelUp = System.currentTimeMillis();
         }
         saveLevelData(discordId, data);
+
+        // Выдача наград за новые уровни
+        if (leveledUp && levelConfig.levelRewards != null && !levelConfig.levelRewards.isEmpty()) {
+            // Находим игрока в онлайне и выдаём награды
+            UUID playerUuid = null;
+            for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
+                if (entry.getValue().equals(discordId)) {
+                    playerUuid = entry.getKey();
+                    break;
+                }
+            }
+            if (playerUuid != null) {
+                Player player = Bukkit.getPlayer(playerUuid);
+                if (player != null && player.isOnline()) {
+                    grantRewards(player, discordId);
+                }
+            }
+        }
+
         checkLevelRoles(discordId, data.level);
     }
 
+    private void grantRewards(Player player, String discordId) {
+        LevelData data = getLevelData(discordId);
+        int currentLevel = data.level;
+        int highestClaimed = data.highestRewardClaimed;
+        if (currentLevel <= highestClaimed) return;
+
+        String playerName = player.getName();
+        for (int lvl = highestClaimed + 1; lvl <= currentLevel; lvl++) {
+            List<String> commands = levelConfig.levelRewards.get(lvl);
+            if (commands != null) {
+                for (String cmd : commands) {
+                    String finalCmd = cmd.replace("{player}", playerName);
+                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), finalCmd);
+                }
+            }
+        }
+        data.highestRewardClaimed = currentLevel;
+        saveLevelData(discordId, data);
+    }
+
     private void checkLevelRoles(String discordId, int level) {
-        // Discord-роли
         if (!guildId.isEmpty() && levelConfig.levelRoles != null) {
             Guild guild = jda.getGuildById(guildId);
             if (guild != null) {
@@ -687,71 +745,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     }
                 });
             }
-        }
-
-        // Minecraft-группы и префиксы (оптимизированная версия)
-        if (levelConfig.minecraftGroups != null && !levelConfig.minecraftGroups.isEmpty()) {
-            UUID playerUuid = null;
-            for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
-                if (entry.getValue().equals(discordId)) {
-                    playerUuid = entry.getKey();
-                    break;
-                }
-            }
-            if (playerUuid == null) return;
-            OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(playerUuid);
-            if (offlinePlayer.getName() == null) return;
-
-            String playerName = offlinePlayer.getName();
-            boolean prefixEnabled = levelConfig.minecraftPrefixEnabled;
-            String prefixType = levelConfig.minecraftPrefixType != null ? levelConfig.minecraftPrefixType : "both";
-
-            // Находим максимальную группу, которую нужно выдать
-            String targetGroup = null;
-            for (Map.Entry<Integer, String> entry : ((TreeMap<Integer, String>) levelConfig.minecraftGroups).descendingMap().entrySet()) {
-                if (level >= entry.getKey()) {
-                    targetGroup = entry.getValue();
-                    break;
-                }
-            }
-
-            final String finalTargetGroup = targetGroup;
-            Bukkit.getScheduler().runTask(this, () -> {
-                // Удаляем все группы из конфига, кроме целевой
-                for (String group : levelConfig.minecraftGroups.values()) {
-                    if (!group.equals(finalTargetGroup)) {
-                        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " parent remove " + group);
-                    }
-                }
-                // Назначаем целевую группу и префикс
-                if (finalTargetGroup != null) {
-                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " parent set " + finalTargetGroup);
-                    if (prefixEnabled) {
-                        String groupColor = levelConfig.minecraftGroupColors.getOrDefault(finalTargetGroup, "&f");
-                        String prefixValue;
-                        switch (prefixType) {
-                            case "lvl":
-                                prefixValue = "&d[LVL " + level + "] ";
-                                break;
-                            case "group":
-                                prefixValue = groupColor + "[" + finalTargetGroup + "] ";
-                                break;
-                            case "level":
-                                prefixValue = "&d[" + level + "] ";
-                                break;
-                            default: // both
-                                prefixValue = groupColor + "[" + finalTargetGroup + " &d" + level + groupColor + "] ";
-                                break;
-                        }
-                        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " meta setprefix 100 " + prefixValue);
-                    }
-                } else {
-                    // Если уровень ниже всех порогов, сбрасываем префикс
-                    if (prefixEnabled) {
-                        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp user " + playerName + " meta removeprefix 100");
-                    }
-                }
-            });
         }
     }
 
@@ -1429,6 +1422,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     }
     private static class LevelConfig {
         boolean textXpEnabled, voiceXpEnabled, voiceExcludeAfk, mcChatXpEnabled;
+        boolean minecraftChatPrefixEnabled;
+        String minecraftChatPrefixFormat;
         List<String> textChannels;
         int textXpPerMessage, textCooldownSeconds, textMinLength, voiceCheckInterval, voiceMinMembers, voiceSampleIntervalSeconds;
         double voiceStreamMultiplier;
@@ -1437,14 +1432,12 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         int base;
         double exponent;
         Map<Integer, String> levelRoles;
-        Map<Integer, String> minecraftGroups;
-        Map<String, String> minecraftGroupColors;
-        boolean minecraftPrefixEnabled;
-        String minecraftPrefixType;
+        Map<Integer, List<String>> levelRewards;
     }
     private static class LevelData {
         int xp, level;
         long lastTextXp;
         long lastLevelUp;
+        int highestRewardClaimed;
     }
 }
