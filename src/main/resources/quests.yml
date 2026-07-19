@@ -276,8 +276,8 @@ pools:
     legendary_firework:
       label: "🎆 Салют"
       description: "Запустите 5 фейерверков"
-      type: mc_event
-      event: "player_firework_launch"
+      type: mc_stat_delta
+      stat: "statistic_use_item:minecraft:firework_rocket"
       target: 5
       reward: 25
     legendary_jump:
