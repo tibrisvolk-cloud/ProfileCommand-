@@ -28,7 +28,6 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.EntityType;
-import org.bukkit.entity.FireworkRocket;
 import org.bukkit.entity.Minecart;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -37,6 +36,7 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityTameEvent;
 import org.bukkit.event.player.*;
+import org.bukkit.event.player.PlayerDeathEvent;
 import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.PotionMeta;
@@ -657,13 +657,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     public void onQuestSleep(PlayerBedEnterEvent event) {
         if (event.getBedEnterResult() == PlayerBedEnterEvent.BedEnterResult.OK) {
             handleQuestEvent(event.getPlayer(), "player_sleep", 1);
-        }
-    }
-
-    @EventHandler
-    public void onQuestFirework(ProjectileLaunchEvent event) {
-        if (event.getEntity() instanceof FireworkRocket && event.getEntity().getShooter() instanceof Player player) {
-            handleQuestEvent(player, "player_firework_launch", 1);
         }
     }
 
