@@ -1,0 +1,303 @@
+# -----------------------------------------------------------
+#                     НАСТРОЙКИ КВЕСТОВ
+# -----------------------------------------------------------
+
+settings:
+  rare_chance: 0.30          # шанс замены одного обычного квеста на редкий
+  legendary_chance: 0.07     # шанс замены одного обычного квеста на легендарный
+                             # (срабатывает ТОЛЬКО если редкий НЕ выпал)
+  timezone: "Europe/Moscow"
+  reset_time: "00:00"        # время сброса квестов
+
+# -----------------------------------------------------------
+#                     ПУЛЫ КВЕСТОВ
+# -----------------------------------------------------------
+
+pools:
+
+  # --- ОБЫЧНЫЕ КВЕСТЫ (20 шт.) ---
+  normal:
+    discord_chat:
+      label: "💬 Болтун"
+      description: "Напишите 8 сообщений в текстовых каналах"
+      type: discord_message
+      target: 8
+      reward: 25
+    voice:
+      label: "🎙️ Голос"
+      description: "Проведите 20 минут в голосовом канале"
+      type: discord_voice_minutes
+      target: 20
+      reward: 35
+    voice_stream:
+      label: "📺 Стример"
+      description: "Включите стрим на 10 минут в голосовом канале"
+      type: discord_stream_minutes
+      target: 10
+      reward: 30
+    playtime:
+      label: "⌛ Игрок"
+      description: "Проведите 30 минут в игре"
+      type: mc_stat_delta
+      stat: "statistic_play_one_minute"
+      target: 30          # минут
+      reward: 25
+    walk:
+      label: "🚶 Пешеход"
+      description: "Пройдите 800 метров"
+      type: mc_stat_delta
+      stat: "statistic_walk_one_cm"
+      target: 80000       # в сантиметрах (800 м)
+      reward: 20
+    mine_blocks:
+      label: "⛏️ Шахтёр"
+      description: "Добудьте 40 блоков (любым способом)"
+      type: mc_stat_delta
+      stat: "statistic_mine_block"   # сумма всех mined
+      target: 40
+      reward: 25
+    break_tool:
+      label: "💥 Разрушитель"
+      description: "Сломайте 1 инструмент"
+      type: mc_event
+      event: "player_item_break"
+      target: 1
+      reward: 22
+    kill_mobs:
+      label: "⚔️ Охотник"
+      description: "Убейте 15 мобов"
+      type: mc_stat_delta
+      stat: "statistic_mob_kills"
+      target: 15
+      reward: 30
+    kill_zombie:
+      label: "🧟 Истребитель зомби"
+      description: "Убейте 10 зомби"
+      type: mc_stat_delta
+      stat: "statistic_kill_entity:minecraft:zombie"
+      target: 10
+      reward: 20
+    kill_skeleton:
+      label: "💀 Скелетоборец"
+      description: "Убейте 10 скелетов"
+      type: mc_stat_delta
+      stat: "statistic_kill_entity:minecraft:skeleton"
+      target: 10
+      reward: 20
+    mc_chat:
+      label: "📝 Писатель"
+      description: "Напишите 5 сообщений в Minecraft-чат"
+      type: mc_chat_message
+      target: 5
+      reward: 15
+    craft:
+      label: "🛠️ Ремесленник"
+      description: "Скрафтите 8 предметов"
+      type: mc_stat_delta
+      stat: "statistic_craft_item"
+      target: 8
+      reward: 20
+    eat:
+      label: "🍞 Обжора"
+      description: "Съешьте 6 единиц еды"
+      type: mc_stat_delta
+      stat: "statistic_eat_total"
+      target: 6
+      reward: 18
+    eat_cake:
+      label: "🍰 Тортоед"
+      description: "Съешьте 3 куска торта"
+      type: mc_stat_delta
+      stat: "statistic_eat_cake_slice"
+      target: 3
+      reward: 22
+    fish:
+      label: "🎣 Рыбак"
+      description: "Поймайте 5 рыб"
+      type: mc_stat_delta
+      stat: "statistic_fish_caught"
+      target: 5
+      reward: 25
+    trade:
+      label: "🏪 Торговец"
+      description: "Совершите 3 сделки с жителями"
+      type: mc_stat_delta
+      stat: "statistic_traded_with_villager"
+      target: 3
+      reward: 20
+    enchant:
+      label: "✨ Чародей"
+      description: "Зачаруйте 2 предмета"
+      type: mc_stat_delta
+      stat: "statistic_item_enchanted"
+      target: 2
+      reward: 25
+    breed:
+      label: "🐣 Фермер"
+      description: "Разведите 3 животных"
+      type: mc_stat_delta
+      stat: "statistic_animals_bred"
+      target: 3
+      reward: 22
+    damage:
+      label: "⚔️ Воин"
+      description: "Нанесите 500 единиц урона"
+      type: mc_stat_delta
+      stat: "statistic_damage_dealt"
+      target: 500
+      reward: 30
+    fill_bucket:
+      label: "🪣 Водонос"
+      description: "Наполните 3 ведра (водой/лавой/рыбой)"
+      type: mc_event
+      event: "player_bucket_fill"
+      target: 3
+      reward: 15
+
+  # --- РЕДКИЕ КВЕСТЫ (12 шт.) ---
+  rare:
+    rare_voice:
+      label: "📻 Радиоведущий"
+      description: "Проведите 40 минут в голосовом канале"
+      type: discord_voice_minutes
+      target: 40
+      reward: 80
+    rare_stream:
+      label: "🎬 Шоумен"
+      description: "Включите стрим на 20 минут"
+      type: discord_stream_minutes
+      target: 20
+      reward: 75
+    rare_discord_chat:
+      label: "🔥 Спамер"
+      description: "Напишите 25 сообщений в чатах"
+      type: discord_message
+      target: 25
+      reward: 100
+    rare_discord_format:
+      label: "🖋️ Каллиграф"
+      description: "Напишите 10 сообщений с форматированием (жирный, курсив и т.д.)"
+      type: discord_formatted_message
+      target: 10
+      reward: 70
+    rare_mobs:
+      label: "💀 Истребитель"
+      description: "Убейте 35 мобов"
+      type: mc_stat_delta
+      stat: "statistic_mob_kills"
+      target: 35
+      reward: 75
+    rare_blocks_ores:
+      label: "💎 Золотые руки"
+      description: "Добудьте 50 руд (уголь, железо, золото и т.д.)"
+      type: mc_event
+      event: "block_break_ore"
+      target: 50
+      reward: 80
+    rare_walk:
+      label: "🏃 Марафонец"
+      description: "Пройдите 2000 метров"
+      type: mc_stat_delta
+      stat: "statistic_walk_one_cm"
+      target: 200000
+      reward: 60
+    rare_mc_chat:
+      label: "✨ Философ"
+      description: "Напишите 12 сообщений в Minecraft-чат"
+      type: mc_chat_message
+      target: 12
+      reward: 50
+    rare_fish:
+      label: "🐟 Китобой"
+      description: "Поймайте 15 рыб"
+      type: mc_stat_delta
+      stat: "statistic_fish_caught"
+      target: 15
+      reward: 70
+    rare_trade:
+      label: "🏅 Барыга"
+      description: "Совершите 10 сделок с жителями"
+      type: mc_stat_delta
+      stat: "statistic_traded_with_villager"
+      target: 10
+      reward: 60
+    rare_enchant:
+      label: "📚 Библиотекарь"
+      description: "Зачаруйте 5 предметов"
+      type: mc_stat_delta
+      stat: "statistic_item_enchanted"
+      target: 5
+      reward: 75
+    rare_craft:
+      label: "🔨 Мастер"
+      description: "Скрафтите 30 предметов"
+      type: mc_stat_delta
+      stat: "statistic_craft_item"
+      target: 30
+      reward: 80
+
+  # --- ЛЕГЕНДАРНЫЕ КВЕСТЫ (9 шт.) ---
+  legendary:
+    legendary_advancement:
+      label: "🏅 Свершение"
+      description: "Получите 1 достижение (ачивку)"
+      type: mc_event
+      event: "player_advancement"
+      target: 1
+      reward: 30
+    legendary_pet:
+      label: "🐺 Верный друг"
+      description: "Приручите кошку или волка"
+      type: mc_event
+      event: "player_tame"
+      target: 1
+      reward: 30
+    legendary_ender_pearl:
+      label: "🌌 Космический прыгун"
+      description: "Используйте эндер-жемчуг 8 раз"
+      type: mc_stat_delta
+      stat: "statistic_use_item:minecraft:ender_pearl"
+      target: 8
+      reward: 25
+    legendary_creeper_hug:
+      label: "🤗 Объятия крипера"
+      description: "Умрите от взрыва крипера"
+      type: mc_event
+      event: "player_death_by_creeper"
+      target: 1
+      reward: 25
+    legendary_sleep:
+      label: "😴 Соня"
+      description: "Поспите в кровати 3 раза"
+      type: mc_event
+      event: "player_sleep"
+      target: 3
+      reward: 20
+    legendary_firework:
+      label: "🎆 Салют"
+      description: "Запустите 5 фейерверков"
+      type: mc_event
+      event: "player_firework_launch"
+      target: 5
+      reward: 25
+    legendary_jump:
+      label: "🦘 Кенгуру"
+      description: "Прыгните 200 раз"
+      type: mc_stat_delta
+      stat: "statistic_jump"
+      target: 200
+      reward: 20
+    legendary_drink_potion:
+      label: "🧪 Алхимик-любитель"
+      description: "Выпейте 3 зелья с эффектом (вода и мутные не считаются)"
+      type: mc_event
+      event: "player_drink_potion_with_effect"
+      target: 3
+      reward: 25
+    legendary_minecart_ride:
+      label: "🚂 Машинист"
+      description: "Проедьте 500 метров в вагонетке"
+      type: mc_event
+      event: "player_minecart_distance"
+      target: 500
+      reward: 25
