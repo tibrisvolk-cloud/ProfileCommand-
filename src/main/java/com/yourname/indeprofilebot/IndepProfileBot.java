@@ -21,17 +21,26 @@ import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.World;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.EntityType;
+import org.bukkit.entity.FireworkRocket;
+import org.bukkit.entity.Minecart;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.player.AsyncPlayerChatEvent;
-import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityTameEvent;
+import org.bukkit.event.player.*;
+import org.bukkit.event.entity.ProjectileLaunchEvent;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.PotionMeta;
+import org.bukkit.potion.PotionType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 
@@ -40,8 +49,11 @@ import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.Files;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -92,7 +104,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private final Map<String, LevelData> levelCache = new ConcurrentHashMap<>();
     private File levelsFile;
     private FileConfiguration levelsConfig;
-    
+
     // Кулдаун для Minecraft чата
     private final Map<UUID, Long> mcChatCooldown = new ConcurrentHashMap<>();
 
@@ -100,11 +112,30 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private final Map<String, Integer> voiceUnmutedSamples = new ConcurrentHashMap<>();
     private final Map<String, Integer> voiceTotalSamples = new ConcurrentHashMap<>();
 
+    // ---------- СИСТЕМА КВЕСТОВ ----------
+    private File questsFile;
+    private FileConfiguration questsConfig;
+    private double rareChance;
+    private double legendaryChance;
+    private ZoneId questTimezone;
+
+    private final Map<String, QuestTemplate> normalPool = new LinkedHashMap<>();
+    private final Map<String, QuestTemplate> rarePool = new LinkedHashMap<>();
+    private final Map<String, QuestTemplate> legendaryPool = new LinkedHashMap<>();
+
+    private final Map<String, PlayerQuestData> playerQuestDataMap = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Long>> statSnapshots = new ConcurrentHashMap<>();
+
+    private File questProgressFile;
+    private FileConfiguration questProgressConfig;
+    // --------------------------------------
+
     @Override
     public void onEnable() {
         saveDefaultConfig();
         reloadConfig();
 
+        // Загрузка основного конфига
         profileFields = getConfig().getMapList("profile-fields");
         topCategories = new LinkedHashMap<>();
         for (String key : getConfig().getConfigurationSection("top-categories").getKeys(false)) {
@@ -164,7 +195,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         recordsUpdateInterval = getConfig().getInt("records.update-interval-minutes", 10);
         loadRecordsState();
 
-        // Система уровней
         levelsEnabled = getConfig().getBoolean("levels.enabled", false);
         if (levelsEnabled) {
             ConfigurationSection levelSec = getConfig().getConfigurationSection("levels");
@@ -197,7 +227,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     levelConfig.levelRoles.put(Integer.parseInt(levelStr), rolesSec.getString(levelStr));
                 }
             }
-            // Награды за уровни
             levelConfig.levelRewards = new HashMap<>();
             ConfigurationSection rewardsSec = levelSec.getConfigurationSection("level-rewards");
             if (rewardsSec != null) {
@@ -259,7 +288,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
 
         if (levelsEnabled && levelConfig.voiceXpEnabled) {
-            // Опрос микрофонов
             new BukkitRunnable() {
                 @Override
                 public void run() {
@@ -267,7 +295,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 }
             }.runTaskTimer(this, 20L * 15, 20L * levelConfig.voiceSampleIntervalSeconds);
 
-            // Начисление голосового опыта
             new BukkitRunnable() {
                 @Override
                 public void run() {
@@ -275,8 +302,412 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 }
             }.runTaskTimer(this, 20L * 30, 20L * 60 * levelConfig.voiceCheckInterval);
         }
+
+        // ---------- ИНИЦИАЛИЗАЦИЯ КВЕСТОВ ----------
+        loadQuestConfig();
+        startQuestResetTask();
+        startMinecraftStatTracker();
     }
 
+    // ---------- МЕТОДЫ ЗАГРУЗКИ КВЕСТОВ ----------
+    private void loadQuestConfig() {
+        questsFile = new File(getDataFolder(), "quests.yml");
+        if (!questsFile.exists()) {
+            saveResource("quests.yml", false);
+        }
+        questsConfig = YamlConfiguration.loadConfiguration(questsFile);
+        ConfigurationSection settings = questsConfig.getConfigurationSection("settings");
+        rareChance = settings.getDouble("rare_chance", 0.3);
+        legendaryChance = settings.getDouble("legendary_chance", 0.07);
+        questTimezone = ZoneId.of(settings.getString("timezone", "Europe/Moscow"));
+
+        normalPool.clear();
+        rarePool.clear();
+        legendaryPool.clear();
+        loadPool(questsConfig.getConfigurationSection("pools.normal"), normalPool);
+        loadPool(questsConfig.getConfigurationSection("pools.rare"), rarePool);
+        loadPool(questsConfig.getConfigurationSection("pools.legendary"), legendaryPool);
+
+        questProgressFile = new File(getDataFolder(), "quests_progress.yml");
+        questProgressConfig = YamlConfiguration.loadConfiguration(questProgressFile);
+        loadQuestProgress();
+    }
+
+    private void loadPool(ConfigurationSection section, Map<String, QuestTemplate> pool) {
+        if (section == null) return;
+        for (String key : section.getKeys(false)) {
+            ConfigurationSection q = section.getConfigurationSection(key);
+            QuestTemplate t = new QuestTemplate();
+            t.id = key;
+            t.label = q.getString("label");
+            t.description = q.getString("description");
+            t.type = q.getString("type");
+            t.stat = q.getString("stat");
+            t.event = q.getString("event");
+            t.target = q.getInt("target");
+            t.reward = q.getInt("reward");
+            pool.put(key, t);
+        }
+    }
+
+    private void loadQuestProgress() {
+        ConfigurationSection dataSec = questProgressConfig.getConfigurationSection("data");
+        if (dataSec == null) return;
+        for (String discordId : dataSec.getKeys(false)) {
+            PlayerQuestData data = new PlayerQuestData();
+            data.date = dataSec.getString(discordId + ".date");
+            data.slots = new ArrayList<>();
+            ConfigurationSection slotsSec = dataSec.getConfigurationSection(discordId + ".slots");
+            if (slotsSec != null) {
+                for (String idx : slotsSec.getKeys(false)) {
+                    ConfigurationSection s = slotsSec.getConfigurationSection(idx);
+                    QuestSlot slot = new QuestSlot();
+                    slot.questId = s.getString("questId");
+                    slot.poolType = s.getString("poolType");
+                    slot.progress = s.getInt("progress");
+                    slot.completed = s.getBoolean("completed");
+                    slot.template = getQuestTemplate(slot.poolType, slot.questId);
+                    data.slots.add(slot);
+                }
+            }
+            playerQuestDataMap.put(discordId, data);
+        }
+    }
+
+    private void saveQuestProgress() {
+        questProgressConfig.set("data", null);
+        for (Map.Entry<String, PlayerQuestData> entry : playerQuestDataMap.entrySet()) {
+            String discordId = entry.getKey();
+            PlayerQuestData data = entry.getValue();
+            questProgressConfig.set("data." + discordId + ".date", data.date);
+            for (int i = 0; i < data.slots.size(); i++) {
+                QuestSlot slot = data.slots.get(i);
+                String path = "data." + discordId + ".slots." + i;
+                questProgressConfig.set(path + ".questId", slot.questId);
+                questProgressConfig.set(path + ".poolType", slot.poolType);
+                questProgressConfig.set(path + ".progress", slot.progress);
+                questProgressConfig.set(path + ".completed", slot.completed);
+            }
+        }
+        try {
+            questProgressConfig.save(questProgressFile);
+        } catch (IOException e) {
+            getLogger().warning("Не удалось сохранить прогресс квестов");
+        }
+    }
+
+    private QuestTemplate getQuestTemplate(String poolType, String questId) {
+        Map<String, QuestTemplate> pool = switch (poolType) {
+            case "normal" -> normalPool;
+            case "rare" -> rarePool;
+            case "legendary" -> legendaryPool;
+            default -> null;
+        };
+        return pool != null ? pool.get(questId) : null;
+    }
+
+    // ---------- ГЕНЕРАЦИЯ КВЕСТОВ ----------
+    public void generateDailyQuests(String discordId) {
+        PlayerQuestData data = playerQuestDataMap.computeIfAbsent(discordId, k -> new PlayerQuestData());
+        data.date = getToday();
+        List<QuestSlot> slots = new ArrayList<>(3);
+
+        List<String> normalIds = new ArrayList<>(normalPool.keySet());
+        Collections.shuffle(normalIds);
+        for (int i = 0; i < 3 && i < normalIds.size(); i++) {
+            QuestSlot slot = new QuestSlot();
+            slot.questId = normalIds.get(i);
+            slot.poolType = "normal";
+            slot.template = normalPool.get(slot.questId);
+            slot.progress = 0;
+            slot.completed = false;
+            slots.add(slot);
+        }
+
+        boolean rareApplied = false;
+        if (ThreadLocalRandom.current().nextDouble() < rareChance) {
+            List<String> rareIds = new ArrayList<>(rarePool.keySet());
+            Collections.shuffle(rareIds);
+            if (!rareIds.isEmpty()) {
+                int idx = ThreadLocalRandom.current().nextInt(3);
+                String rareId = rareIds.get(0);
+                QuestSlot rareSlot = new QuestSlot();
+                rareSlot.questId = rareId;
+                rareSlot.poolType = "rare";
+                rareSlot.template = rarePool.get(rareId);
+                rareSlot.progress = 0;
+                rareSlot.completed = false;
+                slots.set(idx, rareSlot);
+                rareApplied = true;
+            }
+        }
+
+        if (!rareApplied && ThreadLocalRandom.current().nextDouble() < legendaryChance) {
+            List<String> legendaryIds = new ArrayList<>(legendaryPool.keySet());
+            Collections.shuffle(legendaryIds);
+            if (!legendaryIds.isEmpty()) {
+                int idx = ThreadLocalRandom.current().nextInt(3);
+                String legId = legendaryIds.get(0);
+                QuestSlot legSlot = new QuestSlot();
+                legSlot.questId = legId;
+                legSlot.poolType = "legendary";
+                legSlot.template = legendaryPool.get(legId);
+                legSlot.progress = 0;
+                legSlot.completed = false;
+                slots.set(idx, legSlot);
+            }
+        }
+
+        data.slots = slots;
+        UUID uuid = getUuidFromDiscord(discordId);
+        if (uuid != null) {
+            statSnapshots.remove(uuid.toString());
+        }
+        saveQuestProgress();
+    }
+
+    private String getToday() {
+        return LocalDate.now(questTimezone).toString();
+    }
+
+    public boolean needNewQuests(String discordId) {
+        PlayerQuestData data = playerQuestDataMap.get(discordId);
+        if (data == null || !getToday().equals(data.date) || data.slots.isEmpty()) {
+            return true;
+        }
+        for (QuestSlot slot : data.slots) {
+            if (slot.template == null) {
+                slot.template = getQuestTemplate(slot.poolType, slot.questId);
+                if (slot.template == null) return true;
+            }
+        }
+        return false;
+    }
+
+    // ---------- ПРОГРЕСС КВЕСТОВ ----------
+    public void addQuestProgress(String discordId, String questId, int amount) {
+        PlayerQuestData data = playerQuestDataMap.get(discordId);
+        if (data == null) return;
+        for (QuestSlot slot : data.slots) {
+            if (slot.completed || slot.template == null) continue;
+            if (slot.questId.equals(questId)) {
+                slot.progress += amount;
+                if (slot.progress >= slot.template.target) {
+                    slot.progress = slot.template.target;
+                    slot.completed = true;
+                    addXp(discordId, slot.template.reward);
+                    notifyQuestCompleted(discordId, slot);
+                }
+                saveQuestProgress();
+                break;
+            }
+        }
+    }
+
+    public void addQuestProgressByEvent(String discordId, String eventName, int amount) {
+        PlayerQuestData data = playerQuestDataMap.get(discordId);
+        if (data == null) return;
+        for (QuestSlot slot : data.slots) {
+            if (slot.completed || slot.template == null) continue;
+            if (slot.template.event != null && slot.template.event.equals(eventName)) {
+                slot.progress += amount;
+                if (slot.progress >= slot.template.target) {
+                    slot.progress = slot.template.target;
+                    slot.completed = true;
+                    addXp(discordId, slot.template.reward);
+                    notifyQuestCompleted(discordId, slot);
+                }
+                saveQuestProgress();
+                break;
+            }
+        }
+    }
+
+    private void notifyQuestCompleted(String discordId, QuestSlot slot) {
+        if (jda != null) {
+            jda.retrieveUserById(discordId).queue(user -> {
+                user.openPrivateChannel().queue(channel -> {
+                    channel.sendMessage("✅ Квест **" + slot.template.label + "** выполнен! +" + slot.template.reward + " XP").queue();
+                });
+            });
+        }
+        UUID uuid = getUuidFromDiscord(discordId);
+        if (uuid != null) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player != null && player.isOnline()) {
+                player.sendMessage("§a✅ Квест \"" + slot.template.label + "\" выполнен! +" + slot.template.reward + " XP");
+            }
+        }
+    }
+
+    public String makeProgressBar(int current, int max) {
+        int bars = 10;
+        int filled = (int) ((double) current / max * bars);
+        StringBuilder bar = new StringBuilder();
+        for (int i = 0; i < bars; i++) {
+            bar.append(i < filled ? "🟦" : "⬜");
+        }
+        return bar.toString();
+    }
+
+    // ---------- ТАЙМЕРЫ КВЕСТОВ ----------
+    private void startQuestResetTask() {
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                String today = getToday();
+                for (Map.Entry<String, PlayerQuestData> entry : playerQuestDataMap.entrySet()) {
+                    if (!today.equals(entry.getValue().date)) {
+                        generateDailyQuests(entry.getKey());
+                    }
+                }
+            }
+        }.runTaskTimerAsynchronously(this, 1200L, 72000L);
+    }
+
+    private void startMinecraftStatTracker() {
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    UUID uuid = player.getUniqueId();
+                    String discordId = linkedAccounts.get(uuid);
+                    if (discordId == null) continue;
+                    PlayerQuestData data = playerQuestDataMap.get(discordId);
+                    if (data == null || data.slots.isEmpty()) continue;
+
+                    for (QuestSlot slot : data.slots) {
+                        if (slot.completed || slot.template == null) continue;
+                        if (slot.template.type.equals("mc_stat_delta") && slot.template.stat != null) {
+                            long delta = getStatDelta(player, slot.template.stat);
+                            if (delta > 0) {
+                                addQuestProgress(discordId, slot.questId, (int) delta);
+                            }
+                        }
+                    }
+                }
+            }
+        }.runTaskTimer(this, 1200L, 1200L);
+    }
+
+    private long getStatDelta(OfflinePlayer player, String statPlaceholder) {
+        String uuidStr = player.getUniqueId().toString();
+        Map<String, Long> snap = statSnapshots.computeIfAbsent(uuidStr, k -> new ConcurrentHashMap<>());
+        String placeholder = "%" + statPlaceholder + "%";
+        String valueStr = PlaceholderAPI.setPlaceholders(player, placeholder);
+        long current;
+        try {
+            current = Long.parseLong(valueStr.replaceAll("[^0-9]", ""));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+        String statName = statPlaceholder.startsWith("statistic_") ? statPlaceholder.substring("statistic_".length()) : statPlaceholder;
+        Long prev = snap.get(statName);
+        if (prev == null) {
+            snap.put(statName, current);
+            return 0;
+        } else {
+            long delta = current - prev;
+            if (delta > 0) snap.put(statName, current);
+            return Math.max(0, delta);
+        }
+    }
+
+    // ---------- КВЕСТОВЫЕ СОБЫТИЯ BUKKIT ----------
+    @EventHandler
+    public void onQuestItemBreak(PlayerItemBreakEvent event) {
+        handleQuestEvent(event.getPlayer(), "player_item_break", 1);
+    }
+
+    @EventHandler
+    public void onQuestBucketFill(PlayerBucketFillEvent event) {
+        handleQuestEvent(event.getPlayer(), "player_bucket_fill", 1);
+    }
+
+    @EventHandler
+    public void onQuestBlockBreak(BlockBreakEvent event) {
+        if (isOre(event.getBlock().getType())) {
+            handleQuestEvent(event.getPlayer(), "block_break_ore", 1);
+        }
+    }
+
+    @EventHandler
+    public void onQuestTame(EntityTameEvent event) {
+        if (event.getOwner() instanceof Player player) {
+            if (event.getEntity().getType() == EntityType.WOLF || event.getEntity().getType() == EntityType.CAT) {
+                handleQuestEvent(player, "player_tame", 1);
+            }
+        }
+    }
+
+    @EventHandler
+    public void onQuestAdvancement(PlayerAdvancementDoneEvent event) {
+        handleQuestEvent(event.getPlayer(), "player_advancement", 1);
+    }
+
+    @EventHandler
+    public void onQuestDeath(PlayerDeathEvent event) {
+        if (event.getEntity().getLastDamageCause() != null &&
+            event.getEntity().getLastDamageCause().getCause() == EntityDamageEvent.DamageCause.ENTITY_EXPLOSION) {
+            handleQuestEvent(event.getEntity(), "player_death_by_creeper", 1);
+        }
+    }
+
+    @EventHandler
+    public void onQuestSleep(PlayerBedEnterEvent event) {
+        if (event.getBedEnterResult() == PlayerBedEnterEvent.BedEnterResult.OK) {
+            handleQuestEvent(event.getPlayer(), "player_sleep", 1);
+        }
+    }
+
+    @EventHandler
+    public void onQuestFirework(ProjectileLaunchEvent event) {
+        if (event.getEntity() instanceof FireworkRocket && event.getEntity().getShooter() instanceof Player player) {
+            handleQuestEvent(player, "player_firework_launch", 1);
+        }
+    }
+
+    @EventHandler
+    public void onQuestDrink(PlayerItemConsumeEvent event) {
+        ItemStack item = event.getItem();
+        if (item.getType() == Material.POTION || item.getType() == Material.LINGERING_POTION || item.getType() == Material.SPLASH_POTION) {
+            PotionMeta meta = (PotionMeta) item.getItemMeta();
+            if (meta != null && (meta.hasCustomEffects() || meta.getBasePotionType() != PotionType.WATER)) {
+                handleQuestEvent(event.getPlayer(), "player_drink_potion_with_effect", 1);
+            }
+        }
+    }
+
+    @EventHandler
+    public void onQuestMinecartRide(PlayerMoveEvent event) {
+        if (event.getPlayer().isInsideVehicle() && event.getPlayer().getVehicle() instanceof Minecart) {
+            double moved = event.getFrom().distanceSquared(event.getTo());
+            if (moved > 0.0001) {
+                handleQuestEvent(event.getPlayer(), "player_minecart_distance", 1);
+            }
+        }
+    }
+
+    private void handleQuestEvent(Player player, String eventName, int amount) {
+        UUID uuid = player.getUniqueId();
+        String discordId = linkedAccounts.get(uuid);
+        if (discordId != null) {
+            addQuestProgressByEvent(discordId, eventName, amount);
+        }
+    }
+
+    private boolean isOre(Material material) {
+        return switch (material) {
+            case COAL_ORE, IRON_ORE, GOLD_ORE, DIAMOND_ORE, EMERALD_ORE,
+                 REDSTONE_ORE, LAPIS_ORE, COPPER_ORE, NETHER_QUARTZ_ORE,
+                 NETHER_GOLD_ORE, DEEPSLATE_COAL_ORE, DEEPSLATE_IRON_ORE,
+                 DEEPSLATE_GOLD_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_EMERALD_ORE,
+                 DEEPSLATE_REDSTONE_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_COPPER_ORE -> true;
+            default -> false;
+        };
+    }
+
+    // ---------- ОСТАЛЬНЫЕ МЕТОДЫ (из оригинального класса) ----------
     @Override
     public void onDisable() {
         if (jda != null) jda.shutdown();
@@ -301,36 +732,39 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         UUID uuid = player.getUniqueId();
         String discordId = linkedAccounts.get(uuid);
 
-        if (discordId != null && !guildId.isEmpty() && (syncNick || syncRole)) {
-            Guild guild = jda.getGuildById(guildId);
-            if (guild != null) {
-                guild.retrieveMemberById(discordId).queue(member -> {
-                    if (!canModifyMember(member)) return;
-                    if (syncRole && !playerRoleId.isEmpty()) {
-                        Role role = guild.getRoleById(playerRoleId);
-                        if (role != null && !member.getRoles().contains(role)) {
-                            guild.addRoleToMember(member, role).queue();
-                        }
-                    }
-                    if (syncNick) {
-                        String nick = player.getName();
-                        if (!nick.equals(member.getNickname())) {
-                            guild.modifyNickname(member, nick).queue();
-                        }
-                    }
-                });
+        if (discordId != null) {
+            // Генерация квестов при входе
+            if (needNewQuests(discordId)) {
+                generateDailyQuests(discordId);
             }
-        }
 
-        if (achievementsEnabled) {
-            checkAchievements(player);
-        }
+            if (!guildId.isEmpty() && (syncNick || syncRole)) {
+                Guild guild = jda.getGuildById(guildId);
+                if (guild != null) {
+                    guild.retrieveMemberById(discordId).queue(member -> {
+                        if (!canModifyMember(member)) return;
+                        if (syncRole && !playerRoleId.isEmpty()) {
+                            Role role = guild.getRoleById(playerRoleId);
+                            if (role != null && !member.getRoles().contains(role)) {
+                                guild.addRoleToMember(member, role).queue();
+                            }
+                        }
+                        if (syncNick) {
+                            String nick = player.getName();
+                            if (!nick.equals(member.getNickname())) {
+                                guild.modifyNickname(member, nick).queue();
+                            }
+                        }
+                    });
+                }
+            }
 
-        // Выдача неполученных наград за уровни
-        if (levelsEnabled && levelConfig.levelRewards != null && !levelConfig.levelRewards.isEmpty()) {
-            String dId = linkedAccounts.get(uuid);
-            if (dId != null) {
-                grantRewards(player, dId);
+            if (achievementsEnabled) {
+                checkAchievements(player);
+            }
+
+            if (levelsEnabled && levelConfig.levelRewards != null && !levelConfig.levelRewards.isEmpty()) {
+                grantRewards(player, discordId);
             }
         }
     }
@@ -356,16 +790,18 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         Player player = event.getPlayer();
         String message = event.getMessage();
         if (message.length() < levelConfig.mcChatMinLength) return;
-        
+
         UUID uuid = player.getUniqueId();
         long now = System.currentTimeMillis();
         Long last = mcChatCooldown.get(uuid);
         if (last != null && (now - last) < TimeUnit.SECONDS.toMillis(levelConfig.mcChatCooldownSeconds)) return;
-        
+
         mcChatCooldown.put(uuid, now);
         String discordId = linkedAccounts.get(uuid);
         if (discordId != null) {
             addXp(discordId, levelConfig.mcChatXpPerMessage);
+            // Прогресс квеста на сообщения в Minecraft
+            addQuestProgress(discordId, "mc_chat", 1);
         }
     }
 
@@ -667,7 +1103,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         return (int) (levelConfig.base * Math.pow(level, levelConfig.exponent));
     }
 
-    private void addXp(String discordId, int amount) {
+    public void addXp(String discordId, int amount) {
         LevelData data = getLevelData(discordId);
         int oldLevel = data.level;
         data.xp += amount;
@@ -684,9 +1120,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
         saveLevelData(discordId, data);
 
-        // Выдача наград за новые уровни
         if (leveledUp && levelConfig.levelRewards != null && !levelConfig.levelRewards.isEmpty()) {
-            // Находим игрока в онлайне и выдаём награды
             UUID playerUuid = null;
             for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
                 if (entry.getValue().equals(discordId)) {
@@ -793,7 +1227,14 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                         if (member.getVoiceState() != null && member.getVoiceState().isStream()) {
                             xpPerMinute *= levelConfig.voiceStreamMultiplier;
                         }
-                        addXp(id, (int) (xpPerMinute * levelConfig.voiceCheckInterval));
+                        int minutes = levelConfig.voiceCheckInterval;
+                        addXp(id, (int) (xpPerMinute * minutes));
+
+                        // Квестовый прогресс
+                        addQuestProgress(id, "discord_voice_minutes", minutes);
+                        if (member.getVoiceState() != null && member.getVoiceState().isStream()) {
+                            addQuestProgress(id, "discord_stream_minutes", minutes);
+                        }
                     }
                 }
             }
@@ -827,7 +1268,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         try { return Long.parseLong(cleaned); } catch (NumberFormatException e) { return 0; }
     }
 
-    // ----- ПОДСЧЁТ АЧИВОК (БЕЗ РЕЦЕПТОВ) -----
     private int getAdvancementCount(OfflinePlayer player) {
         UUID uuid = player.getUniqueId();
         if (uuid == null || uuid.toString().isEmpty()) return 0;
@@ -945,7 +1385,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 int advCount = getAdvancementCount(player);
                 return String.valueOf(advCount);
             }
-            // ----- БЫСТРЫЙ ПУТЬ ДЛЯ ДОБЫТЫХ БЛОКОВ -----
             case "statistic_mine_block": {
                 UUID uuid = player.getUniqueId();
                 File statsFile = new File(Bukkit.getWorldContainer(), "world/stats/" + uuid + ".json");
@@ -1125,7 +1564,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         return rows;
     }
 
-    // ================== Слушатели ====================
+    // ================== СЛУШАТЕЛИ ====================
 
     private static class CommandListener extends ListenerAdapter {
         private final IndepProfileBot plugin;
@@ -1136,6 +1575,38 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             if (event.getAuthor().isBot()) return;
             String content = event.getMessage().getContentRaw();
             String lower = content.toLowerCase();
+
+            // Квестовый прогресс
+            String userId = event.getAuthor().getId();
+            plugin.addQuestProgress(userId, "discord_chat", 1);
+            if (content.contains("**") || content.contains("*") || content.contains("__") ||
+                content.contains("~~") || content.contains("||") || content.contains("```")) {
+                plugin.addQuestProgressByEvent(userId, "discord_formatted_message", 1);
+            }
+
+            if (lower.equals("!quests")) {
+                List<QuestSlot> slots = new ArrayList<>();
+                PlayerQuestData data = plugin.playerQuestDataMap.get(userId);
+                if (data != null) slots = data.slots;
+                EmbedBuilder embed = new EmbedBuilder();
+                embed.setColor(new Color(0xFFA500));
+                embed.setTitle("📋 Ежедневные задания");
+                embed.setDescription("До сброса в 00:00 МСК");
+                if (slots.isEmpty()) {
+                    embed.addField("Нет активных квестов", "Перезайдите или используйте /quests", false);
+                } else {
+                    for (QuestSlot slot : slots) {
+                        String progressBar = plugin.makeProgressBar(slot.progress, slot.template.target);
+                        embed.addField(
+                            (slot.completed ? "✅ " : "") + slot.template.label,
+                            progressBar + " " + slot.progress + "/" + slot.template.target + " (XP: " + slot.template.reward + ")",
+                            false
+                        );
+                    }
+                }
+                event.getChannel().sendMessageEmbeds(embed.build()).queue();
+                return;
+            }
 
             if (lower.startsWith("!top")) {
                 String defaultCategory = plugin.topCategories.keySet().iterator().next();
@@ -1408,6 +1879,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
+    // ================== ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ ==================
+
     private static class TopCategory { final String label; final String placeholder; TopCategory(String l, String p) { label = l; placeholder = p; } }
     private static class TopState { String category; int page; TopState(String c, int p) { category = c; page = p; } }
     private static class SessionInfo { String ip; long expiry; SessionInfo(String i, long e) { ip = i; expiry = e; } }
@@ -1439,5 +1912,30 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         long lastTextXp;
         long lastLevelUp;
         int highestRewardClaimed;
+    }
+
+    // ---------- КЛАССЫ ДЛЯ КВЕСТОВ ----------
+    public static class QuestTemplate {
+        String id;
+        String label;
+        String description;
+        String type;
+        String stat;
+        String event;
+        int target;
+        int reward;
+    }
+
+    public static class QuestSlot {
+        String questId;
+        String poolType;
+        QuestTemplate template;
+        int progress;
+        boolean completed;
+    }
+
+    public static class PlayerQuestData {
+        String date;
+        List<QuestSlot> slots = new ArrayList<>();
     }
 }
