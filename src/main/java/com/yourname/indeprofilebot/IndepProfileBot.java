@@ -406,6 +406,15 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         return pool != null ? pool.get(questId) : null;
     }
 
+    private UUID getUuidFromDiscord(String discordId) {
+        for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
+            if (entry.getValue().equals(discordId)) {
+                return entry.getKey();
+            }
+        }
+        return null;
+    }
+    
     // ---------- ГЕНЕРАЦИЯ КВЕСТОВ ----------
     public void generateDailyQuests(String discordId) {
         PlayerQuestData data = playerQuestDataMap.computeIfAbsent(discordId, k -> new PlayerQuestData());
