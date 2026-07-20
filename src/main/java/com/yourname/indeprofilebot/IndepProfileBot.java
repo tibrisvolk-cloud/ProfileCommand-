@@ -36,7 +36,7 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityTameEvent;
 import org.bukkit.event.player.*;
-import org.bukkit.event.player.PlayerDeathEvent;
+import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.PotionMeta;
@@ -646,12 +646,15 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     }
 
     @EventHandler
-    public void onQuestDeath(PlayerDeathEvent event) {
-        if (event.getEntity().getLastDamageCause() != null &&
-            event.getEntity().getLastDamageCause().getCause() == EntityDamageEvent.DamageCause.ENTITY_EXPLOSION) {
-            handleQuestEvent(event.getEntity(), "player_death_by_creeper", 1);
+    public void onQuestDeath(EntityDeathEvent event) {
+        if (event.getEntity() instanceof Player player) {
+            if (player.getLastDamageCause() != null &&
+                player.getLastDamageCause().getCause() == EntityDamageEvent.DamageCause.ENTITY_EXPLOSION) {
+                handleQuestEvent(player, "player_death_by_creeper", 1);
+            }
         }
     }
+
 
     @EventHandler
     public void onQuestSleep(PlayerBedEnterEvent event) {
