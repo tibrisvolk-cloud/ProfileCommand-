@@ -34,9 +34,9 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntityTameEvent;
 import org.bukkit.event.player.*;
-import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.PotionMeta;
@@ -414,7 +414,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
         return null;
     }
-    
+
     // ---------- ГЕНЕРАЦИЯ КВЕСТОВ ----------
     public void generateDailyQuests(String discordId) {
         PlayerQuestData data = playerQuestDataMap.computeIfAbsent(discordId, k -> new PlayerQuestData());
@@ -663,7 +663,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
         }
     }
-
 
     @EventHandler
     public void onQuestSleep(PlayerBedEnterEvent event) {
@@ -1590,15 +1589,23 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
 
             if (lower.equals("!quests")) {
+                String uid = event.getAuthor().getId();
+
+                // Авто-генерация если нет квестов
+                if (plugin.playerQuestDataMap.get(uid) == null || plugin.needNewQuests(uid)) {
+                    plugin.generateDailyQuests(uid);
+                }
+
                 List<QuestSlot> slots = new ArrayList<>();
-                PlayerQuestData data = plugin.playerQuestDataMap.get(userId);
+                PlayerQuestData data = plugin.playerQuestDataMap.get(uid);
                 if (data != null) slots = data.slots;
+
                 EmbedBuilder embed = new EmbedBuilder();
                 embed.setColor(new Color(0xFFA500));
                 embed.setTitle("📋 Ежедневные задания");
                 embed.setDescription("До сброса в 00:00 МСК");
                 if (slots.isEmpty()) {
-                    embed.addField("Нет активных квестов", "Перезайдите или используйте /quests", false);
+                    embed.addField("Нет активных квестов", "Попробуйте перезайти на сервер или повторите !quests", false);
                 } else {
                     for (QuestSlot slot : slots) {
                         String progressBar = plugin.makeProgressBar(slot.progress, slot.template.target);
