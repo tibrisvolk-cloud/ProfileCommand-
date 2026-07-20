@@ -23,6 +23,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -101,6 +102,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     // Система уровней
     private boolean levelsEnabled;
     private LevelConfig levelConfig;
+    private String levelUpChannelId;   // <-- добавлено
     private final Map<String, LevelData> levelCache = new ConcurrentHashMap<>();
     private File levelsFile;
     private FileConfiguration levelsConfig;
@@ -235,6 +237,9 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     levelConfig.levelRewards.put(lvl, rewardsSec.getStringList(levelStr));
                 }
             }
+
+            // Канал для поздравлений с уровнями
+            levelUpChannelId = levelSec.getString("level-up-channel", "");
 
             levelsFile = new File(getDataFolder(), "levels.yml");
             if (!levelsFile.exists()) {
@@ -711,7 +716,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         };
     }
 
-    // ---------- ОСТАЛЬНЫЕ МЕТОДЫ (из оригинального класса) ----------
+    // ---------- ОСТАЛЬНЫЕ МЕТОДЫ ----------
     @Override
     public void onDisable() {
         if (jda != null) jda.shutdown();
@@ -737,7 +742,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         String discordId = linkedAccounts.get(uuid);
 
         if (discordId != null) {
-            // Генерация квестов при входе
             if (needNewQuests(discordId)) {
                 generateDailyQuests(discordId);
             }
@@ -775,7 +779,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onPlayerChat(AsyncPlayerChatEvent event) {
-        // Префикс уровня в чате
         if (levelsEnabled && levelConfig.minecraftChatPrefixEnabled) {
             Player player = event.getPlayer();
             UUID uuid = player.getUniqueId();
@@ -789,7 +792,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
         }
 
-        // Начисление опыта за Minecraft чат
         if (!levelsEnabled || !levelConfig.mcChatXpEnabled) return;
         Player player = event.getPlayer();
         String message = event.getMessage();
@@ -804,7 +806,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         String discordId = linkedAccounts.get(uuid);
         if (discordId != null) {
             addXp(discordId, levelConfig.mcChatXpPerMessage);
-            // Прогресс квеста на сообщения в Minecraft
             addQuestProgress(discordId, "mc_chat", 1);
         }
     }
@@ -1121,6 +1122,27 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
         if (leveledUp) {
             data.lastLevelUp = System.currentTimeMillis();
+
+            // ---- НОВЫЕ ОПОВЕЩЕНИЯ ----
+            // Discord
+            notifyLevelUp(discordId, data.level);
+
+            // Minecraft (если игрок онлайн)
+            UUID playerUuid = null;
+            for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
+                if (entry.getValue().equals(discordId)) {
+                    playerUuid = entry.getKey();
+                    break;
+                }
+            }
+            if (playerUuid != null) {
+                Player player = Bukkit.getPlayer(playerUuid);
+                if (player != null && player.isOnline()) {
+                    player.sendMessage(ChatColor.GOLD + "🎉 Поздравляем! Вы достигли " + ChatColor.GREEN + data.level + " уровня!" + ChatColor.GOLD + " Продолжайте в том же духе!");
+                    player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
+                }
+            }
+            // ------------------------
         }
         saveLevelData(discordId, data);
 
@@ -1141,6 +1163,33 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
 
         checkLevelRoles(discordId, data.level);
+    }
+
+    private void notifyLevelUp(String discordId, int newLevel) {
+        if (jda == null) return;
+        // Личное сообщение
+        jda.retrieveUserById(discordId).queue(user -> {
+            user.openPrivateChannel().queue(channel -> {
+                EmbedBuilder eb = new EmbedBuilder();
+                eb.setColor(new Color(0xFFD700));
+                eb.setTitle("🎉 Поздравляем!");
+                eb.setDescription("Вы достигли **" + newLevel + " уровня**!");
+                eb.setFooter("Продолжайте играть и получать опыт!");
+                channel.sendMessageEmbeds(eb.build()).queue();
+            });
+        });
+
+        // Канал в гильдии (если указан)
+        if (levelUpChannelId != null && !levelUpChannelId.isEmpty()) {
+            GuildMessageChannel channel = jda.getChannelById(GuildMessageChannel.class, levelUpChannelId);
+            if (channel != null) {
+                EmbedBuilder eb = new EmbedBuilder();
+                eb.setColor(new Color(0xFFD700));
+                eb.setTitle("🎉 Новый уровень!");
+                eb.setDescription("<@" + discordId + "> достиг **" + newLevel + " уровня**!");
+                channel.sendMessageEmbeds(eb.build()).queue();
+            }
+        }
     }
 
     private void grantRewards(Player player, String discordId) {
@@ -1234,7 +1283,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                         int minutes = levelConfig.voiceCheckInterval;
                         addXp(id, (int) (xpPerMinute * minutes));
 
-                        // Квестовый прогресс
                         addQuestProgress(id, "discord_voice_minutes", minutes);
                         if (member.getVoiceState() != null && member.getVoiceState().isStream()) {
                             addQuestProgress(id, "discord_stream_minutes", minutes);
@@ -1580,7 +1628,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             String content = event.getMessage().getContentRaw();
             String lower = content.toLowerCase();
 
-            // Квестовый прогресс
             String userId = event.getAuthor().getId();
             plugin.addQuestProgress(userId, "discord_chat", 1);
             if (content.contains("**") || content.contains("*") || content.contains("__") ||
@@ -1590,8 +1637,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
             if (lower.equals("!quests")) {
                 String uid = event.getAuthor().getId();
-
-                // Авто-генерация если нет квестов
                 if (plugin.playerQuestDataMap.get(uid) == null || plugin.needNewQuests(uid)) {
                     plugin.generateDailyQuests(uid);
                 }
@@ -1610,8 +1655,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     for (QuestSlot slot : slots) {
                         String progressBar = plugin.makeProgressBar(slot.progress, slot.template.target);
                         String fieldValue = progressBar + " " + slot.progress + "/" + slot.template.target +
-                            " (XP: " + slot.template.reward + ")\n" +
-                            (slot.template.description != null ? slot.template.description : "");
+                                            " (XP: " + slot.template.reward + ")\n" +
+                                            (slot.template.description != null ? slot.template.description : "");
                         embed.addField(
                             (slot.completed ? "✅ " : "") + slot.template.label,
                             fieldValue,
