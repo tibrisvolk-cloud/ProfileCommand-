@@ -1609,9 +1609,12 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 } else {
                     for (QuestSlot slot : slots) {
                         String progressBar = plugin.makeProgressBar(slot.progress, slot.template.target);
+                        String fieldValue = progressBar + " " + slot.progress + "/" + slot.template.target +
+                            " (XP: " + slot.template.reward + ")\n" +
+                            (slot.template.description != null ? slot.template.description : "");
                         embed.addField(
                             (slot.completed ? "✅ " : "") + slot.template.label,
-                            progressBar + " " + slot.progress + "/" + slot.template.target + " (XP: " + slot.template.reward + ")",
+                            fieldValue,
                             false
                         );
                     }
