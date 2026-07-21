@@ -3,8 +3,6 @@ package com.yourname.indeprofilebot;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.mojang.authlib.GameProfile;
-import com.mojang.authlib.properties.Property;
 import me.clip.placeholderapi.PlaceholderAPI;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
@@ -52,7 +50,6 @@ import org.bukkit.scheduler.BukkitRunnable;
 
 import java.awt.Color;
 import java.io.*;
-import java.lang.reflect.Field;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.Files;
@@ -1319,6 +1316,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
+    // ========== ИСПРАВЛЕННЫЙ МЕТОД ДЛЯ ГОЛОВ (без authlib) ==========
     private void applyProfile(ItemStack item, String value) {
         if (item.getType() != Material.PLAYER_HEAD) return;
 
@@ -1344,12 +1342,11 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
                     if (base64 != null) {
                         SkullMeta meta = (SkullMeta) item.getItemMeta();
-                        GameProfile profile = new GameProfile(UUID.randomUUID(), "CustomHead");
-                        profile.getProperties().put("textures", new Property("textures", base64));
-
-                        Field field = meta.getClass().getDeclaredField("profile");
-                        field.setAccessible(true);
-                        field.set(meta, profile);
+                        org.bukkit.profile.PlayerProfile profile = Bukkit.createPlayerProfile(UUID.randomUUID(), "CustomHead");
+                        org.bukkit.profile.PlayerTextures textures = profile.getTextures();
+                        textures.setSkin(new URL("https://textures.minecraft.net/texture/" + base64));
+                        profile.setTextures(textures);
+                        meta.setOwnerProfile(profile);
                         item.setItemMeta(meta);
                     }
                 } catch (Exception e) {
