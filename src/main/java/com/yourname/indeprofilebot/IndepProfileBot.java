@@ -1455,9 +1455,9 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                         addXp(id, (int) (xpPerMinute * minutes));
 
                         // Квестовый прогресс
-                        addQuestProgress(id, "discord_voice_minutes", minutes);
+                        addQuestProgress(id, "voice", minutes);
                         if (member.getVoiceState() != null && member.getVoiceState().isStream()) {
-                            addQuestProgress(id, "discord_stream_minutes", minutes);
+                            addQuestProgress(id, "voice_stream", minutes);
                         }
                     }
                 }
