@@ -3,6 +3,8 @@ package com.yourname.indeprofilebot;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.mojang.authlib.GameProfile;
+import com.mojang.authlib.properties.Property;
 import me.clip.placeholderapi.PlaceholderAPI;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
@@ -40,7 +42,6 @@ import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntityTameEvent;
 import org.bukkit.event.player.*;
-import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.PotionMeta;
@@ -51,6 +52,7 @@ import org.bukkit.scheduler.BukkitRunnable;
 
 import java.awt.Color;
 import java.io.*;
+import java.lang.reflect.Field;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.Files;
@@ -1318,13 +1320,41 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     }
 
     private void applyProfile(ItemStack item, String value) {
+        if (item.getType() != Material.PLAYER_HEAD) return;
+
         if (value.startsWith("{") && value.endsWith("}")) {
             String inner = value.substring(1, value.length() - 1);
-            String name = inner.split(":")[1].replace("\"", "").trim();
-            if (item.getType() == Material.PLAYER_HEAD) {
+
+            // Формат {name:"..."}
+            if (inner.contains("\"name\"")) {
+                String name = inner.split(":")[1].replace("\"", "").trim();
                 SkullMeta meta = (SkullMeta) item.getItemMeta();
                 meta.setOwner(name);
                 item.setItemMeta(meta);
+            }
+            // Формат с текстурами: {properties:[{name:"textures",value:"BASE64"}]}
+            else if (inner.contains("\"properties\"")) {
+                try {
+                    String base64 = null;
+                    if (inner.contains("\"value\":\"")) {
+                        int start = inner.indexOf("\"value\":\"") + 9;
+                        int end = inner.indexOf("\"", start);
+                        base64 = inner.substring(start, end);
+                    }
+
+                    if (base64 != null) {
+                        SkullMeta meta = (SkullMeta) item.getItemMeta();
+                        GameProfile profile = new GameProfile(UUID.randomUUID(), "CustomHead");
+                        profile.getProperties().put("textures", new Property("textures", base64));
+
+                        Field field = meta.getClass().getDeclaredField("profile");
+                        field.setAccessible(true);
+                        field.set(meta, profile);
+                        item.setItemMeta(meta);
+                    }
+                } catch (Exception e) {
+                    getLogger().warning("Не удалось установить текстуру головы: " + e.getMessage());
+                }
             }
         }
     }
