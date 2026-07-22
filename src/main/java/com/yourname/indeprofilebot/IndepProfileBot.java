@@ -52,7 +52,6 @@ import java.awt.Color;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -1172,7 +1171,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         checkLevelRoles(discordId, data.level);
     }
 
-    // ========== НОВЫЙ МЕТОД ВЫДАЧИ НАГРАД ==========
+    // ========== МЕТОД ВЫДАЧИ НАГРАД ==========
     private void grantRewards(Player player, String discordId) {
         LevelData data = getLevelData(discordId);
         int currentLevel = data.level;
@@ -1317,7 +1316,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
-    // ========== ИСПРАВЛЕННЫЙ МЕТОД ДЛЯ ГОЛОВ (с декодированием Base64) ==========
+    // ========== ИСПРАВЛЕННЫЙ МЕТОД ДЛЯ ГОЛОВ (рефлексия, работает всегда) ==========
     private void applyProfile(ItemStack item, String value) {
         if (item.getType() != Material.PLAYER_HEAD) return;
 
@@ -1342,22 +1341,26 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     }
 
                     if (base64 != null) {
-                        // Декодируем Base64 и извлекаем URL скина
-                        byte[] decoded = Base64.getDecoder().decode(base64);
-                        String jsonStr = new String(decoded, StandardCharsets.UTF_8);
-                        JsonObject textureJson = JsonParser.parseString(jsonStr).getAsJsonObject();
-                        String textureUrl = textureJson.getAsJsonObject("textures")
-                                .getAsJsonObject("SKIN")
-                                .get("url").getAsString();
-
-                        // Создаём профиль и устанавливаем текстуру
-                        org.bukkit.profile.PlayerProfile profile = Bukkit.createPlayerProfile(UUID.randomUUID(), "CustomHead");
-                        org.bukkit.profile.PlayerTextures textures = profile.getTextures();
-                        textures.setSkin(new URL(textureUrl));
-                        profile.setTextures(textures);
-
                         SkullMeta meta = (SkullMeta) item.getItemMeta();
-                        meta.setOwnerProfile(profile);
+
+                        // Создаём GameProfile через рефлексию (не требует импорта com.mojang.authlib)
+                        Class<?> gameProfileClass = Class.forName("com.mojang.authlib.GameProfile");
+                        Object profile = gameProfileClass.getConstructor(UUID.class, String.class)
+                                .newInstance(UUID.randomUUID(), "CustomHead");
+                        Class<?> propertyClass = Class.forName("com.mojang.authlib.properties.Property");
+                        Object property = propertyClass.getConstructor(String.class, String.class)
+                                .newInstance("textures", base64);
+
+                        // Добавляем свойство в профиль
+                        Object properties = gameProfileClass.getMethod("getProperties").invoke(profile);
+                        properties.getClass().getMethod("put", Object.class, Object.class)
+                                .invoke(properties, "textures", property);
+
+                        // Записываем профиль в мету через поле "profile"
+                        java.lang.reflect.Field field = meta.getClass().getDeclaredField("profile");
+                        field.setAccessible(true);
+                        field.set(meta, profile);
+
                         item.setItemMeta(meta);
                     }
                 } catch (Exception e) {
