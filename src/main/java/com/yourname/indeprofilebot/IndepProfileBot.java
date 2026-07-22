@@ -43,7 +43,6 @@ import org.bukkit.event.player.*;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.PotionMeta;
-import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.potion.PotionType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -1171,7 +1170,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         checkLevelRoles(discordId, data.level);
     }
 
-    // ========== МЕТОД ВЫДАЧИ НАГРАД ==========
+    // ========== МЕТОД ВЫДАЧИ НАГРАД (ГОЛОВЫ ЧЕРЕЗ КОНСОЛЬ) ==========
     private void grantRewards(Player player, String discordId) {
         LevelData data = getLevelData(discordId);
         int currentLevel = data.level;
@@ -1186,17 +1185,20 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             for (String cmd : commands) {
                 String finalCmd = cmd.replace("{player}", playerName);
 
-                // Выдача предметов напрямую
-                if (finalCmd.startsWith("give " + playerName + " ")) {
+                // Если команда выдаёт голову игрока – выполняем как консольную команду
+                if (finalCmd.contains("player_head[profile=")) {
+                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), finalCmd);
+                }
+                // Остальные give-команды парсим через наш код (для зачарований и простых предметов)
+                else if (finalCmd.startsWith("give " + playerName + " ")) {
                     try {
                         giveItem(player, finalCmd.substring(("give " + playerName + " ").length()));
                     } catch (Exception e) {
                         getLogger().warning("Ошибка парсинга предмета: " + finalCmd + " - " + e.getMessage());
-                        // fallback на команду
                         Bukkit.dispatchCommand(Bukkit.getConsoleSender(), finalCmd);
                     }
                 } else {
-                    // Обычные команды (xp, tellraw, effect)
+                    // xp, tellraw, effect – обычные команды
                     Bukkit.dispatchCommand(Bukkit.getConsoleSender(), finalCmd);
                 }
             }
@@ -1255,10 +1257,9 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             applyEnchantments(item, compStr.substring("enchantments=".length()), false);
         } else if (compStr.startsWith("stored_enchantments=")) {
             applyEnchantments(item, compStr.substring("stored_enchantments=".length()), true);
-        } else if (compStr.startsWith("profile=")) {
-            applyProfile(item, compStr.substring("profile=".length()));
         } else {
-            throw new IllegalArgumentException("Неподдерживаемый компонент: " + compStr);
+            // Профили голов обрабатываются отдельно в grantRewards
+            throw new IllegalArgumentException("Неподдерживаемый компонент (должен обрабатываться консолью): " + compStr);
         }
     }
 
@@ -1316,59 +1317,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
-    // ========== ИСПРАВЛЕННЫЙ МЕТОД ДЛЯ ГОЛОВ (рефлексия, работает всегда) ==========
-    private void applyProfile(ItemStack item, String value) {
-        if (item.getType() != Material.PLAYER_HEAD) return;
-
-        if (value.startsWith("{") && value.endsWith("}")) {
-            String inner = value.substring(1, value.length() - 1);
-
-            // Формат {name:"..."}
-            if (inner.contains("\"name\"")) {
-                String name = inner.split(":")[1].replace("\"", "").trim();
-                SkullMeta meta = (SkullMeta) item.getItemMeta();
-                meta.setOwner(name);
-                item.setItemMeta(meta);
-            }
-            // Формат с текстурами: {properties:[{name:"textures",value:"BASE64"}]}
-            else if (inner.contains("\"properties\"")) {
-                try {
-                    String base64 = null;
-                    if (inner.contains("\"value\":\"")) {
-                        int start = inner.indexOf("\"value\":\"") + 9;
-                        int end = inner.indexOf("\"", start);
-                        base64 = inner.substring(start, end);
-                    }
-
-                    if (base64 != null) {
-                        SkullMeta meta = (SkullMeta) item.getItemMeta();
-
-                        // Создаём GameProfile через рефлексию (не требует импорта com.mojang.authlib)
-                        Class<?> gameProfileClass = Class.forName("com.mojang.authlib.GameProfile");
-                        Object profile = gameProfileClass.getConstructor(UUID.class, String.class)
-                                .newInstance(UUID.randomUUID(), "CustomHead");
-                        Class<?> propertyClass = Class.forName("com.mojang.authlib.properties.Property");
-                        Object property = propertyClass.getConstructor(String.class, String.class)
-                                .newInstance("textures", base64);
-
-                        // Добавляем свойство в профиль
-                        Object properties = gameProfileClass.getMethod("getProperties").invoke(profile);
-                        properties.getClass().getMethod("put", Object.class, Object.class)
-                                .invoke(properties, "textures", property);
-
-                        // Записываем профиль в мету через поле "profile"
-                        java.lang.reflect.Field field = meta.getClass().getDeclaredField("profile");
-                        field.setAccessible(true);
-                        field.set(meta, profile);
-
-                        item.setItemMeta(meta);
-                    }
-                } catch (Exception e) {
-                    getLogger().warning("Не удалось установить текстуру головы: " + e.getMessage());
-                }
-            }
-        }
-    }
+    // ---------- МЕТОД ДЛЯ ГОЛОВ БОЛЬШЕ НЕ НУЖЕН (удалён) ----------
 
     private void notifyLevelUp(String discordId, int newLevel) {
         if (jda == null) return;
