@@ -2106,7 +2106,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
                         EmbedBuilder rankEmbed = new EmbedBuilder();
                         rankEmbed.setColor(new Color(0xFFD700)); 
-                        rankEmbed.setAuthor("Боевой Пропуск: Сезон 1", null, event.getUser().getEffectiveAvatarUrl());
+                        rankEmbed.setAuthor("Paw Pass: Сезон 1", null, event.getUser().getEffectiveAvatarUrl());
                         
                         rankEmbed.addField("⭐ Текущий уровень: " + currentLevel, 
                                     bar.toString() + " **" + String.format("%.0f", percent * 100) + "%**\n" +
@@ -2145,7 +2145,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     
                     long midnightUnix = java.time.LocalDate.now(plugin.questTimezone)
                             .plusDays(1).atStartOfDay(plugin.questTimezone).toEpochSecond();
-                    qEmbed.setDescription("🔄 Обновление <t:" + midnightUnix + ":R>\n*Выполняй задания, чтобы апать Battle Pass!*");
+                    qEmbed.setDescription("🔄 Обновление <t:" + midnightUnix + ":R>\n*Выполняй задания, чтобы апать Paw Pass!*");
 
                     if (plugin.globalQuestEnabled) {
                         String status = plugin.globalQuestCompleted 
