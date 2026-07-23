@@ -306,7 +306,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     Commands.slash("link", "Привязать Minecraft аккаунт")
                         .addOption(OptionType.STRING, "код", "Код из кик-сообщения", true),
                     Commands.slash("unlink", "Отвязать Minecraft аккаунт"),
-                    Commands.slash("rank", "Показать Battle Pass и опыт"),
+                    Commands.slash("rank", "Показать PawPass и опыт"),
                     Commands.slash("quests", "Ежедневные квесты")
                 ).queue();
 
@@ -387,7 +387,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
             String discordId = linkedAccounts.get(target.getUniqueId());
             if (discordId == null) {
-                sender.sendMessage("§cИгрок " + targetName + " не привязан к Discord! Опыт Battle Pass не может быть выдан.");
+                sender.sendMessage("§cИгрок " + targetName + " не привязан к Discord! Опыт PawPass не может быть выдан.");
                 return true;
             }
 
@@ -617,7 +617,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         PlayerQuestData data = playerQuestDataMap.get(discordId);
         if (data == null) return;
         
-        // Индивидуальные квесты
         for (QuestSlot slot : data.slots) {
             if (slot.completed || slot.template == null) continue;
             if (slot.template.event != null && slot.template.event.equals(eventName)) {
@@ -634,7 +633,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
         }
         
-        // Глобальный квест
         if (globalQuestEnabled && !globalQuestCompleted && globalQuestStat != null && globalQuestStat.equals(eventName)) {
             globalQuestProgress += amount;
             globalQuestParticipants.add(discordId);
@@ -1331,7 +1329,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             if (playerUuid != null) {
                 Player player = Bukkit.getPlayer(playerUuid);
                 if (player != null && player.isOnline()) {
-                    player.sendMessage(ChatColor.GOLD + "🎉 Поздравляем! Вы достигли " + ChatColor.GREEN + data.level + " уровня!" + ChatColor.GOLD + " Продолжайте в том же духе!");
+                    player.sendMessage(ChatColor.GOLD + "🎉 Поздравляем! Вы достигли " + ChatColor.GREEN + data.level + " уровня PawPass!" + ChatColor.GOLD + " Продолжайте в том же духе!");
                     player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
                     grantRewards(player, discordId);
                 }
@@ -1368,7 +1366,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 EmbedBuilder eb = new EmbedBuilder();
                 eb.setColor(new Color(0xFFD700));
                 eb.setTitle("🎉 Поздравляем!");
-                eb.setDescription("Вы достигли **" + newLevel + " уровня** Battle Pass!");
+                eb.setDescription("Вы достигли **" + newLevel + " уровня** PawPass!");
                 eb.setFooter("Продолжайте играть и получать награды!");
                 channel.sendMessageEmbeds(eb.build()).queue();
             });
@@ -1822,14 +1820,17 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 
                 long midnightUnix = java.time.LocalDate.now(plugin.questTimezone)
                         .plusDays(1).atStartOfDay(plugin.questTimezone).toEpochSecond();
-                embed.setDescription("🔄 Обновление <t:" + midnightUnix + ":R>\n*Выполняй задания, чтобы апать Battle Pass!*");
+                embed.setDescription("🔄 Обновление <t:" + midnightUnix + ":R>\n*Выполняй задания, чтобы апать PawPass!*");
 
                 if (plugin.globalQuestEnabled) {
                     String status = plugin.globalQuestCompleted 
                             ? "✅ Выполнено! Награды выданы." 
                             : plugin.makeProgressBar((int)plugin.globalQuestProgress, (int)plugin.globalQuestTarget) + " **" + plugin.globalQuestProgress + "/" + plugin.globalQuestTarget + "**";
                     
-                    embed.addField("🌍 ГЛОБАЛЬНАЯ ЦЕЛЬ", status + "\n💬 *" + plugin.globalQuestDesc + "*\n⚡ **Награда:** " + plugin.globalQuestRewardXp + " XP + Трофей", false);
+                    embed.addField("🌍 ГЛОБАЛЬНАЯ ЦЕЛЬ", 
+                            "⚡ **Награда:** " + plugin.globalQuestRewardXp + " XP + Трофей\n" +
+                            "💬 *" + plugin.globalQuestDesc + "*\n" + 
+                            (plugin.globalQuestCompleted ? "" : status), false);
                 }
 
                 if (slots.isEmpty()) {
@@ -1939,15 +1940,10 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
         private void sendProfileEmbed(GuildMessageChannel channel, OfflinePlayer player) {
             EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
-            
-            String pName = player.getName() != null ? player.getName() : "Unknown";
-            String cleanName = pName.replaceAll("[^a-zA-Z0-9_]", "");
-            if (cleanName.isEmpty()) cleanName = "Steve";
-            String avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + cleanName + "/128";
-
-            embed.setAuthor(pName, null, avatarUrl);
+            String playerName = player.getName() != null ? player.getName() : "Unknown";
+            String avatarUrl = "https://minotar.net/avatar/" + playerName + "/128";
+            embed.setAuthor(playerName, null, avatarUrl);
             embed.setThumbnail(avatarUrl);
-            
             for (Map<?, ?> fieldMap : plugin.profileFields) {
                 String emoji = (String) fieldMap.get("emoji");
                 String label = (String) fieldMap.get("label");
@@ -1981,7 +1977,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
             EmbedBuilder eb = new EmbedBuilder();
             eb.setColor(new Color(0xFFD700)); 
-            eb.setAuthor("Боевой Пропуск: Сезон 1", null, event.getAuthor().getEffectiveAvatarUrl());
+            eb.setAuthor("PawPass: Сезон 1", null, event.getAuthor().getEffectiveAvatarUrl());
             
             eb.addField("⭐ Текущий уровень: " + currentLevel, 
                         bar.toString() + " **" + String.format("%.0f", percent * 100) + "%**\n" +
@@ -2022,15 +2018,10 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                         event.getHook().sendMessage("❌ Игрок не найден.").queue();
                     } else {
                         EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
-                        
                         String pName = target.getName() != null ? target.getName() : "Unknown";
-                        String cleanName = pName.replaceAll("[^a-zA-Z0-9_]", "");
-                        if (cleanName.isEmpty()) cleanName = "Steve";
-                        String avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + cleanName + "/128";
-
+                        String avatarUrl = "https://minotar.net/avatar/" + pName + "/128";
                         embed.setAuthor(pName, null, avatarUrl);
                         embed.setThumbnail(avatarUrl);
-                        
                         for (Map<?, ?> fieldMap : plugin.profileFields) {
                             String emoji = (String) fieldMap.get("emoji");
                             String label = (String) fieldMap.get("label");
@@ -2063,15 +2054,10 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                             event.getHook().sendMessage("❌ Ваш Minecraft-аккаунт не найден.").queue();
                         } else {
                             EmbedBuilder selfEmbed = new EmbedBuilder().setColor(new Color(0x5865F2));
-                            
                             String pName = self.getName() != null ? self.getName() : "Unknown";
-                            String cleanName = pName.replaceAll("[^a-zA-Z0-9_]", "");
-                            if (cleanName.isEmpty()) cleanName = "Steve";
-                            String avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + cleanName + "/128";
-
+                            String avatarUrl = "https://minotar.net/avatar/" + pName + "/128";
                             selfEmbed.setAuthor(pName, null, avatarUrl);
                             selfEmbed.setThumbnail(avatarUrl);
-                            
                             for (Map<?, ?> fieldMap : plugin.profileFields) {
                                 String emoji = (String) fieldMap.get("emoji");
                                 String label = (String) fieldMap.get("label");
@@ -2106,7 +2092,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
                         EmbedBuilder rankEmbed = new EmbedBuilder();
                         rankEmbed.setColor(new Color(0xFFD700)); 
-                        rankEmbed.setAuthor("Paw Pass: Сезон 1", null, event.getUser().getEffectiveAvatarUrl());
+                        rankEmbed.setAuthor("PawPass: Сезон 1", null, event.getUser().getEffectiveAvatarUrl());
                         
                         rankEmbed.addField("⭐ Текущий уровень: " + currentLevel, 
                                     bar.toString() + " **" + String.format("%.0f", percent * 100) + "%**\n" +
@@ -2145,14 +2131,17 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     
                     long midnightUnix = java.time.LocalDate.now(plugin.questTimezone)
                             .plusDays(1).atStartOfDay(plugin.questTimezone).toEpochSecond();
-                    qEmbed.setDescription("🔄 Обновление <t:" + midnightUnix + ":R>\n*Выполняй задания, чтобы апать Paw Pass!*");
+                    qEmbed.setDescription("🔄 Обновление <t:" + midnightUnix + ":R>\n*Выполняй задания, чтобы апать PawPass!*");
 
                     if (plugin.globalQuestEnabled) {
                         String status = plugin.globalQuestCompleted 
                                 ? "✅ Выполнено! Награды выданы." 
                                 : plugin.makeProgressBar((int)plugin.globalQuestProgress, (int)plugin.globalQuestTarget) + " **" + plugin.globalQuestProgress + "/" + plugin.globalQuestTarget + "**";
                         
-                        qEmbed.addField("🌍 ГЛОБАЛЬНАЯ ЦЕЛЬ", status + "\n💬 *" + plugin.globalQuestDesc + "*\n⚡ **Награда:** " + plugin.globalQuestRewardXp + " XP + Трофей", false);
+                        qEmbed.addField("🌍 ГЛОБАЛЬНАЯ ЦЕЛЬ", 
+                                "⚡ **Награда:** " + plugin.globalQuestRewardXp + " XP + Трофей\n" +
+                                "💬 *" + plugin.globalQuestDesc + "*\n" + 
+                                (plugin.globalQuestCompleted ? "" : status), false);
                     }
 
                     if (qSlots.isEmpty()) {
