@@ -65,19 +65,19 @@ import java.util.stream.Stream;
 public class IndepProfileBot extends JavaPlugin implements Listener {
 
     private JDA jda;
-    private List<Map<?, ?>> profileFields;
-    private Map<String, TopCategory> topCategories;
+    public List<Map<?, ?>> profileFields;
+    public Map<String, TopCategory> topCategories;
     private int topPageSize;
-    private final Map<String, TopState> topStates = new ConcurrentHashMap<>();
+    public final Map<String, TopState> topStates = new ConcurrentHashMap<>();
 
     // 2FA
-    private boolean twoFactorEnabled;
+    public boolean twoFactorEnabled;
     private int sessionDurationMinutes;
     private int verificationTimeoutMinutes;
     private String linkKickMessage;
     private String verifyKickMessage;
     private final Map<String, String> linkCodes = new ConcurrentHashMap<>();
-    private final Map<UUID, String> linkedAccounts = new ConcurrentHashMap<>();
+    public final Map<UUID, String> linkedAccounts = new ConcurrentHashMap<>();
     private final Map<UUID, PendingVerification> pendingVerifications = new ConcurrentHashMap<>();
     private final Map<UUID, SessionInfo> sessions = new ConcurrentHashMap<>();
     private File linkedFile;
@@ -103,8 +103,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private String recordsMessageId;
 
     // Система уровней
-    private boolean levelsEnabled;
-    private LevelConfig levelConfig;
+    public boolean levelsEnabled;
+    public LevelConfig levelConfig;
     private String levelUpChannelId;
     private final Map<String, LevelData> levelCache = new ConcurrentHashMap<>();
     private File levelsFile;
@@ -122,14 +122,14 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private FileConfiguration questsConfig;
     private double rareChance;
     private double legendaryChance;
-    private ZoneId questTimezone;
+    public ZoneId questTimezone;
     private ScheduledExecutorService questScheduler;
 
     private final Map<String, QuestTemplate> normalPool = new LinkedHashMap<>();
     private final Map<String, QuestTemplate> rarePool = new LinkedHashMap<>();
     private final Map<String, QuestTemplate> legendaryPool = new LinkedHashMap<>();
 
-    private final Map<String, PlayerQuestData> playerQuestDataMap = new ConcurrentHashMap<>();
+    public final Map<String, PlayerQuestData> playerQuestDataMap = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Long>> statSnapshots = new ConcurrentHashMap<>();
 
     private File questProgressFile;
@@ -141,7 +141,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         saveDefaultConfig();
         reloadConfig();
 
-        // Загрузка основного конфига
         profileFields = getConfig().getMapList("profile-fields");
         topCategories = new LinkedHashMap<>();
         for (String key : getConfig().getConfigurationSection("top-categories").getKeys(false)) {
@@ -201,7 +200,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         recordsUpdateInterval = getConfig().getInt("records.update-interval-minutes", 10);
         loadRecordsState();
 
-        // Система уровней
         levelsEnabled = getConfig().getBoolean("levels.enabled", false);
         if (levelsEnabled) {
             ConfigurationSection levelSec = getConfig().getConfigurationSection("levels");
@@ -227,6 +225,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             levelConfig.minecraftChatPrefixFormat = levelSec.getString("minecraft-chat-prefix-format", "&d[LVL {level}] &r");
             levelConfig.base = levelSec.getInt("level-formula.base", 100);
             levelConfig.exponent = levelSec.getDouble("level-formula.exponent", 2.0);
+            
             levelConfig.levelRoles = new HashMap<>();
             ConfigurationSection rolesSec = levelSec.getConfigurationSection("level-roles");
             if (rolesSec != null) {
@@ -234,15 +233,24 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     levelConfig.levelRoles.put(Integer.parseInt(levelStr), rolesSec.getString(levelStr));
                 }
             }
-            // Награды за уровни
+
             levelConfig.levelRewards = new HashMap<>();
             ConfigurationSection rewardsSec = levelSec.getConfigurationSection("level-rewards");
             if (rewardsSec != null) {
                 for (String levelStr : rewardsSec.getKeys(false)) {
-                    int lvl = Integer.parseInt(levelStr);
-                    levelConfig.levelRewards.put(lvl, rewardsSec.getStringList(levelStr));
+                    levelConfig.levelRewards.put(Integer.parseInt(levelStr), rewardsSec.getStringList(levelStr));
                 }
             }
+            
+            // Динамические превью наград
+            levelConfig.rewardPreviews = new HashMap<>();
+            ConfigurationSection previewsSec = levelSec.getConfigurationSection("reward-previews");
+            if (previewsSec != null) {
+                for (String levelStr : previewsSec.getKeys(false)) {
+                    levelConfig.rewardPreviews.put(Integer.parseInt(levelStr), previewsSec.getString(levelStr));
+                }
+            }
+
             levelUpChannelId = levelSec.getString("level-up-channel", "");
 
             levelsFile = new File(getDataFolder(), "levels.yml");
@@ -259,7 +267,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             return;
         }
 
-        // АСИНХРОННЫЙ ЗАПУСК JDA (чтобы не вешать сервер)
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
             try {
                 jda = JDABuilder.createDefault(token)
@@ -314,7 +321,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }.runTaskTimer(this, 20L * 30, 20L * 60 * levelConfig.voiceCheckInterval);
         }
 
-        // ---------- ИНИЦИАЛИЗАЦИЯ КВЕСТОВ ----------
         loadQuestConfig();
         startQuestResetTask();
         startMinecraftStatTracker();
@@ -326,7 +332,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         if (questScheduler != null) questScheduler.shutdownNow();
     }
 
-    // ---------- МЕТОДЫ ЗАГРУЗКИ КВЕСТОВ ----------
     private void loadQuestConfig() {
         questsFile = new File(getDataFolder(), "quests.yml");
         if (!questsFile.exists()) {
@@ -424,7 +429,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         return pool != null ? pool.get(questId) : null;
     }
 
-    private UUID getUuidFromDiscord(String discordId) {
+    public UUID getUuidFromDiscord(String discordId) {
         for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
             if (entry.getValue().equals(discordId)) {
                 return entry.getKey();
@@ -433,7 +438,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         return null;
     }
 
-    // ---------- ГЕНЕРАЦИЯ КВЕСТОВ ----------
     public void generateDailyQuests(String discordId) {
         PlayerQuestData data = playerQuestDataMap.computeIfAbsent(discordId, k -> new PlayerQuestData());
         data.date = LocalDate.now(questTimezone).toString();
@@ -507,7 +511,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         return false;
     }
 
-    // ---------- ПРОГРЕСС КВЕСТОВ ----------
     public void addQuestProgress(String discordId, String questId, int amount) {
         PlayerQuestData data = playerQuestDataMap.get(discordId);
         if (data == null) return;
@@ -593,7 +596,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         return bar.toString();
     }
 
-    // ---------- ТАЙМЕРЫ КВЕСТОВ ----------
     private void startQuestResetTask() {
         questScheduler = Executors.newScheduledThreadPool(1);
         ZonedDateTime now = ZonedDateTime.now(questTimezone);
@@ -658,7 +660,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
-    // ---------- КВЕСТОВЫЕ СОБЫТИЯ BUKKIT ----------
     @EventHandler
     public void onQuestItemBreak(PlayerItemBreakEvent event) {
         handleQuestEvent(event.getPlayer(), "player_item_break", 1);
@@ -749,8 +750,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             default -> false;
         };
     }
-
-    // ---------- ОСТАЛЬНЫЕ МЕТОДЫ ----------
 
     private boolean canModifyMember(Member member) {
         if (member == null) return false;
@@ -1110,7 +1109,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
-    private LevelData getLevelData(String discordId) {
+    public LevelData getLevelData(String discordId) {
         return levelCache.computeIfAbsent(discordId, k -> {
             LevelData data = new LevelData();
             data.xp = levelsConfig.getInt(k + ".xp", 0);
@@ -1135,13 +1134,12 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
-    private int getXpForLevel(int level) {
+    public int getXpForLevel(int level) {
         return (int) (levelConfig.base * Math.pow(level, levelConfig.exponent));
     }
 
     public void addXp(String discordId, int amount) {
         LevelData data = getLevelData(discordId);
-        int oldLevel = data.level;
         data.xp += amount;
         data.totalXp += amount;
         
@@ -1171,9 +1169,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         checkLevelRoles(discordId, data.level);
     }
 
-    // =========================================================
-    // НОВАЯ СИСТЕМА ВЫДАЧИ НАГРАД (ВСЁ ЧЕРЕЗ КОНСОЛЬ)
-    // =========================================================
     private void grantRewards(Player player, String discordId) {
         LevelData data = getLevelData(discordId);
         int currentLevel = data.level;
@@ -1465,18 +1460,13 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
-    private OfflinePlayer findOfflinePlayer(String name) {
+    public OfflinePlayer findOfflinePlayer(String name) {
         OfflinePlayer target = Bukkit.getOfflinePlayer(name);
-        if (target.getName() != null && target.hasPlayedBefore()) return target;
-        for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
-            if (p.getName() != null && p.getName().equalsIgnoreCase(name) && p.hasPlayedBefore()) {
-                return p;
-            }
-        }
+        if (target.hasPlayedBefore() || target.isOnline()) return target;
         target = Bukkit.getOfflinePlayer("." + name);
-        if (target.getName() != null && target.hasPlayedBefore()) return target;
+        if (target.hasPlayedBefore() || target.isOnline()) return target;
         target = Bukkit.getOfflinePlayer("*" + name);
-        if (target.getName() != null && target.hasPlayedBefore()) return target;
+        if (target.hasPlayedBefore() || target.isOnline()) return target;
         return null;
     }
 
@@ -1506,20 +1496,22 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 String discordId = linkedAccounts.get(p.getUniqueId());
                 if (discordId != null) {
                     LevelData data = getLevelData(discordId);
-                    numeric = data.totalXp; // Сортируем топ уровней по общему опыту!
+                    numeric = data.totalXp; 
                     lastLevelUpTimes.put(name, data.lastLevelUp);
+                    formattedValues.put(name, data.level + " Ур. (" + data.totalXp + " XP)");
                 } else {
                     numeric = 0;
                     lastLevelUpTimes.put(name, 0L);
+                    formattedValues.put(name, "0 Ур. (0 XP)");
                 }
             } else if (placeholder.equals("statistic_time_played")) {
                 numeric = parsePlaytimeToMinutes(rawValue);
+                formattedValues.put(name, formatCategoryValue(categoryKey, rawValue, numeric));
             } else {
                 numeric = parseStatistic(rawValue);
+                formattedValues.put(name, formatCategoryValue(categoryKey, rawValue, numeric));
             }
-            
             scores.put(name, numeric);
-            formattedValues.put(name, formatCategoryValue(categoryKey, rawValue, numeric));
         }
 
         Stream<Map.Entry<String, Long>> stream = scores.entrySet().stream();
@@ -1539,21 +1531,23 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 .collect(Collectors.toList());
     }
 
-    private long parsePlaytimeToMinutes(String raw) {
+    public long parsePlaytimeToMinutes(String raw) {
         if (raw == null || raw.isEmpty()) return 0;
-        raw = raw.toLowerCase().replaceAll("\\s+", "");
         long total = 0;
-        try {
-            if (raw.contains("h")) {
-                String[] parts = raw.split("h");
-                total += Long.parseLong(parts[0]) * 60;
-                if (parts.length > 1) raw = parts[1]; else raw = "";
-            }
-            if (raw.contains("m")) {
-                String[] parts = raw.split("m");
-                total += Long.parseLong(parts[0]);
-            }
-        } catch (NumberFormatException e) { return 0; }
+        
+        java.util.regex.Matcher mDays = java.util.regex.Pattern.compile("(\\d+)\\s*(d|д|day|дн)").matcher(raw.toLowerCase());
+        if (mDays.find()) {
+            try { total += Long.parseLong(mDays.group(1)) * 24 * 60; } catch (Exception ignored) {}
+        }
+        java.util.regex.Matcher mHours = java.util.regex.Pattern.compile("(\\d+)\\s*(h|ч|hour|час)").matcher(raw.toLowerCase());
+        if (mHours.find()) {
+            try { total += Long.parseLong(mHours.group(1)) * 60; } catch (Exception ignored) {}
+        }
+        java.util.regex.Matcher mMins = java.util.regex.Pattern.compile("(\\d+)\\s*(m|м|min|мин)").matcher(raw.toLowerCase());
+        if (mMins.find()) {
+            try { total += Long.parseLong(mMins.group(1)); } catch (Exception ignored) {}
+        }
+        
         return total;
     }
 
@@ -1565,7 +1559,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             case "playtime":
                 return rawValue;
             case "level":
-                // В топе уровней выводим сам уровень, но сортировка под капотом идет по totalXp
                 return rawValue;
             default:
                 return rawValue;
@@ -1678,7 +1671,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     }
                 }
                 
-                embed.setFooter("Сезон 1 • Выполняй контракты каждый день");
+                embed.setFooter("Сезон 1 • Выполняй квесты каждый день");
                 event.getChannel().sendMessageEmbeds(embed.build()).queue();
                 return;
             }
@@ -1732,32 +1725,24 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
 
         private void showProfile(MessageReceivedEvent event, String targetName, boolean isSelf) {
-            OfflinePlayer target;
+            OfflinePlayer target = null;
             if (isSelf) {
                 String discordId = event.getAuthor().getId();
-                UUID playerUuid = null;
-                for (Map.Entry<UUID, String> entry : plugin.linkedAccounts.entrySet()) {
-                    if (entry.getValue().equals(discordId)) {
-                        playerUuid = entry.getKey();
-                        break;
-                    }
-                }
+                UUID playerUuid = plugin.getUuidFromDiscord(discordId);
                 if (playerUuid == null) {
-                    event.getMessage().reply("❌ Ваш Discord не привязан к аккаунту Minecraft. Используйте `!link <код>`, полученный при входе на сервер.").queue();
+                    event.getMessage().reply("❌ Ваш Discord не привязан к аккаунту Minecraft. Используйте `!link <код>`.").queue();
                     return;
                 }
                 target = Bukkit.getOfflinePlayer(playerUuid);
-                if (!target.hasPlayedBefore()) {
-                    event.getMessage().reply("❌ Ваш Minecraft-аккаунт не найден.").queue();
-                    return;
-                }
             } else {
                 target = plugin.findOfflinePlayer(targetName);
-                if (target == null) {
-                    event.getMessage().reply("❌ Игрок не найден.").queue();
-                    return;
-                }
             }
+
+            if (target == null || (!target.hasPlayedBefore() && !target.isOnline())) {
+                event.getMessage().reply("❌ Игрок не найден.").queue();
+                return;
+            }
+
             sendProfileEmbed(event.getChannel().asGuildMessageChannel(), target);
         }
 
@@ -1804,11 +1789,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                         bar.toString() + " **" + String.format("%.0f", percent * 100) + "%**\n" +
                         "Опыт: `" + currentXp + " / " + nextLevelXp + " XP`", false);
 
-            String nextReward = "Новые ресурсы и бонусы";
-            if (currentLevel + 1 == 5) nextReward = "🥉 Бронзовый кубок + Роль Discord";
-            if (currentLevel + 1 == 10) nextReward = "🥈 Серебряный кубок + Роль Discord";
-            if (currentLevel + 1 == 15) nextReward = "🥇 Золотой кубок + Роль Discord";
-            if (currentLevel + 1 == 20) nextReward = "👑 Корона Легенды + Вечная Роль";
+            String nextReward = plugin.levelConfig.rewardPreviews.getOrDefault(currentLevel + 1, "Новые ресурсы и бонусы");
             
             if (currentLevel < 20) {
                 eb.addField("🎁 Награда за следующий уровень:", "> " + nextReward, false);
@@ -1838,7 +1819,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     event.deferReply().queue();
                     String nick = event.getOption("ник").getAsString();
                     OfflinePlayer target = plugin.findOfflinePlayer(nick);
-                    if (target == null) {
+                    
+                    if (target == null || (!target.hasPlayedBefore() && !target.isOnline())) {
                         event.getHook().sendMessage("❌ Игрок не найден.").queue();
                     } else {
                         EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
@@ -1866,18 +1848,13 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 case "me":
                     event.deferReply().queue();
                     String discordId = event.getUser().getId();
-                    UUID playerUuid = null;
-                    for (Map.Entry<UUID, String> entry : plugin.linkedAccounts.entrySet()) {
-                        if (entry.getValue().equals(discordId)) {
-                            playerUuid = entry.getKey();
-                            break;
-                        }
-                    }
+                    UUID playerUuid = plugin.getUuidFromDiscord(discordId);
+                    
                     if (playerUuid == null) {
                         event.getHook().sendMessage("❌ Ваш Discord не привязан к Minecraft. Используйте `!link <код>`.").queue();
                     } else {
                         OfflinePlayer self = Bukkit.getOfflinePlayer(playerUuid);
-                        if (!self.hasPlayedBefore()) {
+                        if (!self.hasPlayedBefore() && !self.isOnline()) {
                             event.getHook().sendMessage("❌ Ваш Minecraft-аккаунт не найден.").queue();
                         } else {
                             EmbedBuilder selfEmbed = new EmbedBuilder().setColor(new Color(0x5865F2));
@@ -1923,11 +1900,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                                     bar.toString() + " **" + String.format("%.0f", percent * 100) + "%**\n" +
                                     "Опыт: `" + currentXp + " / " + nextLevelXp + " XP`", false);
 
-                        String nextReward = "Новые ресурсы и бонусы";
-                        if (currentLevel + 1 == 5) nextReward = "🥉 Бронзовый кубок + Роль Discord";
-                        if (currentLevel + 1 == 10) nextReward = "🥈 Серебряный кубок + Роль Discord";
-                        if (currentLevel + 1 == 15) nextReward = "🥇 Золотой кубок + Роль Discord";
-                        if (currentLevel + 1 == 20) nextReward = "👑 Корона Легенды + Вечная Роль";
+                        String nextReward = plugin.levelConfig.rewardPreviews.getOrDefault(currentLevel + 1, "Новые ресурсы и бонусы");
                         
                         if (currentLevel < 20) {
                             rankEmbed.addField("🎁 Награда за следующий уровень:", "> " + nextReward, false);
@@ -1989,7 +1962,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                         }
                     }
                     
-                    qEmbed.setFooter("Сезон 1 • Выполняй контракты каждый день");
+                    qEmbed.setFooter("Сезон 1 • Выполняй квесты каждый день");
                     event.getHook().sendMessageEmbeds(qEmbed.build()).queue();
                     break;
                 case "link":
@@ -2046,63 +2019,64 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
-    private static class TopCategory { final String label; final String placeholder; TopCategory(String l, String p) { label = l; placeholder = p; } }
-    private static class TopState { String category; int page; TopState(String c, int p) { category = c; page = p; } }
-    private static class SessionInfo { String ip; long expiry; SessionInfo(String i, long e) { ip = i; expiry = e; } }
-    private static class PendingVerification { String ip; long timestamp; PendingVerification(String i, long t) { ip = i; timestamp = t; } }
-    private static class Achievement {
-        String id, label, placeholder, roleId;
-        long threshold;
-        Achievement(String id, String label, String placeholder, long threshold, String roleId) {
+    public static class TopCategory { public final String label; public final String placeholder; public TopCategory(String l, String p) { label = l; placeholder = p; } }
+    public static class TopState { public String category; public int page; public TopState(String c, int p) { category = c; page = p; } }
+    public static class SessionInfo { public String ip; public long expiry; public SessionInfo(String i, long e) { ip = i; expiry = e; } }
+    public static class PendingVerification { public String ip; public long timestamp; public PendingVerification(String i, long t) { ip = i; timestamp = t; } }
+    public static class Achievement {
+        public String id, label, placeholder, roleId;
+        public long threshold;
+        public Achievement(String id, String label, String placeholder, long threshold, String roleId) {
             this.id = id; this.label = label; this.placeholder = placeholder;
             this.threshold = threshold; this.roleId = roleId;
         }
     }
-    private static class LevelConfig {
-        boolean textXpEnabled, voiceXpEnabled, voiceExcludeAfk, mcChatXpEnabled;
-        boolean minecraftChatPrefixEnabled;
-        String minecraftChatPrefixFormat;
-        List<String> textChannels;
-        int textXpPerMessage, textCooldownSeconds, textMinLength, voiceCheckInterval, voiceMinMembers, voiceSampleIntervalSeconds;
-        double voiceStreamMultiplier;
-        int voiceSpeakingXpPerMinute, voiceMutedXpPerMinute;
-        int mcChatXpPerMessage, mcChatCooldownSeconds, mcChatMinLength;
-        int base;
-        double exponent;
-        Map<Integer, String> levelRoles;
-        Map<Integer, List<String>> levelRewards;
+    public static class LevelConfig {
+        public boolean textXpEnabled, voiceXpEnabled, voiceExcludeAfk, mcChatXpEnabled;
+        public boolean minecraftChatPrefixEnabled;
+        public String minecraftChatPrefixFormat;
+        public List<String> textChannels;
+        public int textXpPerMessage, textCooldownSeconds, textMinLength, voiceCheckInterval, voiceMinMembers, voiceSampleIntervalSeconds;
+        public double voiceStreamMultiplier;
+        public int voiceSpeakingXpPerMinute, voiceMutedXpPerMinute;
+        public int mcChatXpPerMessage, mcChatCooldownSeconds, mcChatMinLength;
+        public int base;
+        public double exponent;
+        public Map<Integer, String> levelRoles;
+        public Map<Integer, List<String>> levelRewards;
+        public Map<Integer, String> rewardPreviews;
     }
-    private static class LevelData {
-        int xp, level;
-        int totalXp;
-        long lastTextXp;
-        long lastLevelUp;
-        int highestRewardClaimed;
+    public static class LevelData {
+        public int xp, level;
+        public int totalXp;
+        public long lastTextXp;
+        public long lastLevelUp;
+        public int highestRewardClaimed;
     }
 
     // ---------- КЛАССЫ ДЛЯ КВЕСТОВ ----------
     public static class QuestTemplate {
-        String id;
-        String label;
-        String description;
-        String type;
-        String stat;
-        String event;
-        int target;
-        int reward;
-        List<String> commands;
+        public String id;
+        public String label;
+        public String description;
+        public String type;
+        public String stat;
+        public String event;
+        public int target;
+        public int reward;
+        public List<String> commands;
     }
 
     public static class QuestSlot {
-        String questId;
-        String poolType;
-        QuestTemplate template;
-        int progress;
-        boolean completed;
+        public String questId;
+        public String poolType;
+        public QuestTemplate template;
+        public int progress;
+        public boolean completed;
     }
 
     public static class PlayerQuestData {
-        String date;
-        List<QuestSlot> slots = new ArrayList<>();
+        public String date;
+        public List<QuestSlot> slots = new ArrayList<>();
     }
 }
