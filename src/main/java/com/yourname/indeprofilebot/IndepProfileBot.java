@@ -1462,11 +1462,20 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
     public OfflinePlayer findOfflinePlayer(String name) {
         OfflinePlayer target = Bukkit.getOfflinePlayer(name);
-        if (target.hasPlayedBefore() || target.isOnline()) return target;
+        if (target.getName() != null && (target.hasPlayedBefore() || target.isOnline())) return target;
+        
+        for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
+            if (p.getName() != null && p.getName().equalsIgnoreCase(name) && (p.hasPlayedBefore() || p.isOnline())) {
+                return p;
+            }
+        }
+        
         target = Bukkit.getOfflinePlayer("." + name);
-        if (target.hasPlayedBefore() || target.isOnline()) return target;
+        if (target.getName() != null && (target.hasPlayedBefore() || target.isOnline())) return target;
+        
         target = Bukkit.getOfflinePlayer("*" + name);
-        if (target.hasPlayedBefore() || target.isOnline()) return target;
+        if (target.getName() != null && (target.hasPlayedBefore() || target.isOnline())) return target;
+        
         return null;
     }
 
@@ -1642,7 +1651,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 
                 long midnightUnix = java.time.LocalDate.now(plugin.questTimezone)
                         .plusDays(1).atStartOfDay(plugin.questTimezone).toEpochSecond();
-                embed.setDescription("🔄 Обновление <t:" + midnightUnix + ":R>\n*Выполняй задания, чтобы апать Battle Pass!*");
+                embed.setDescription("🔄 Обновление <t:" + midnightUnix + ":R>\n*Выполняй задания, чтобы апать Paw Pass!*");
 
                 if (slots.isEmpty()) {
                     embed.addField("Нет активных квестов", "Попробуйте перезайти на сервер.", false);
@@ -1748,8 +1757,16 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
         private void sendProfileEmbed(GuildMessageChannel channel, OfflinePlayer player) {
             EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
-            embed.setAuthor(player.getName(), null, "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + player.getName() + "/128");
-            embed.setThumbnail("[https://minotar.net/avatar/](https://minotar.net/avatar/)" + player.getName() + "/128");
+            
+            String pName = player.getName() != null ? player.getName() : "Unknown";
+            String avatarUrl = "[https://minotar.net/avatar/Steve/128](https://minotar.net/avatar/Steve/128)";
+            try {
+                avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + java.net.URLEncoder.encode(pName, "UTF-8") + "/128";
+            } catch (Exception ignored) {}
+
+            embed.setAuthor(pName, null, avatarUrl);
+            embed.setThumbnail(avatarUrl);
+            
             for (Map<?, ?> fieldMap : plugin.profileFields) {
                 String emoji = (String) fieldMap.get("emoji");
                 String label = (String) fieldMap.get("label");
@@ -1824,8 +1841,16 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                         event.getHook().sendMessage("❌ Игрок не найден.").queue();
                     } else {
                         EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
-                        embed.setAuthor(target.getName(), null, "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + target.getName() + "/128");
-                        embed.setThumbnail("[https://minotar.net/avatar/](https://minotar.net/avatar/)" + target.getName() + "/128");
+                        
+                        String pName = target.getName() != null ? target.getName() : "Unknown";
+                        String avatarUrl = "[https://minotar.net/avatar/Steve/128](https://minotar.net/avatar/Steve/128)";
+                        try {
+                            avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + java.net.URLEncoder.encode(pName, "UTF-8") + "/128";
+                        } catch (Exception ignored) {}
+
+                        embed.setAuthor(pName, null, avatarUrl);
+                        embed.setThumbnail(avatarUrl);
+                        
                         for (Map<?, ?> fieldMap : plugin.profileFields) {
                             String emoji = (String) fieldMap.get("emoji");
                             String label = (String) fieldMap.get("label");
@@ -1858,8 +1883,16 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                             event.getHook().sendMessage("❌ Ваш Minecraft-аккаунт не найден.").queue();
                         } else {
                             EmbedBuilder selfEmbed = new EmbedBuilder().setColor(new Color(0x5865F2));
-                            selfEmbed.setAuthor(self.getName(), null, "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + self.getName() + "/128");
-                            selfEmbed.setThumbnail("[https://minotar.net/avatar/](https://minotar.net/avatar/)" + self.getName() + "/128");
+                            
+                            String pName = self.getName() != null ? self.getName() : "Unknown";
+                            String avatarUrl = "[https://minotar.net/avatar/Steve/128](https://minotar.net/avatar/Steve/128)";
+                            try {
+                                avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + java.net.URLEncoder.encode(pName, "UTF-8") + "/128";
+                            } catch (Exception ignored) {}
+
+                            selfEmbed.setAuthor(pName, null, avatarUrl);
+                            selfEmbed.setThumbnail(avatarUrl);
+                            
                             for (Map<?, ?> fieldMap : plugin.profileFields) {
                                 String emoji = (String) fieldMap.get("emoji");
                                 String label = (String) fieldMap.get("label");
@@ -1894,7 +1927,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
                         EmbedBuilder rankEmbed = new EmbedBuilder();
                         rankEmbed.setColor(new Color(0xFFD700)); 
-                        rankEmbed.setAuthor("Боевой Пропуск: Сезон 1", null, event.getUser().getEffectiveAvatarUrl());
+                        rankEmbed.setAuthor("Paw Pass: Сезон 1", null, event.getUser().getEffectiveAvatarUrl());
                         
                         rankEmbed.addField("⭐ Текущий уровень: " + currentLevel, 
                                     bar.toString() + " **" + String.format("%.0f", percent * 100) + "%**\n" +
