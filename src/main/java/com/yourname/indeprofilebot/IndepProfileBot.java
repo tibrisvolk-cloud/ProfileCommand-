@@ -25,6 +25,8 @@ import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -134,7 +136,18 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
     private File questProgressFile;
     private FileConfiguration questProgressConfig;
-    // --------------------------------------
+
+    // ---------- ГЛОБАЛЬНЫЙ КВЕСТ ----------
+    public boolean globalQuestEnabled;
+    public String globalQuestStat;
+    public long globalQuestTarget;
+    public String globalQuestDesc;
+    public int globalQuestRewardXp;
+    public List<String> globalQuestCommands;
+    
+    public long globalQuestProgress;
+    public boolean globalQuestCompleted;
+    public Set<String> globalQuestParticipants = ConcurrentHashMap.newKeySet();
 
     @Override
     public void onEnable() {
@@ -242,7 +255,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 }
             }
             
-            // Динамические превью наград
             levelConfig.rewardPreviews = new HashMap<>();
             ConfigurationSection previewsSec = levelSec.getConfigurationSection("reward-previews");
             if (previewsSec != null) {
@@ -258,6 +270,17 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 try { levelsFile.createNewFile(); } catch (IOException ignored) {}
             }
             levelsConfig = YamlConfiguration.loadConfiguration(levelsFile);
+        }
+
+        // Инициализация Глобального Квеста
+        ConfigurationSection gqSec = getConfig().getConfigurationSection("global-quest");
+        if (gqSec != null) {
+            globalQuestEnabled = gqSec.getBoolean("enabled", false);
+            globalQuestStat = gqSec.getString("stat");
+            globalQuestTarget = gqSec.getLong("target", 50000);
+            globalQuestDesc = gqSec.getString("description", "Глобальная цель");
+            globalQuestRewardXp = gqSec.getInt("reward-xp", 500);
+            globalQuestCommands = gqSec.getStringList("commands");
         }
 
         String token = getConfig().getString("bot-token");
@@ -332,6 +355,49 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         if (questScheduler != null) questScheduler.shutdownNow();
     }
 
+    // ==========================================
+    //          КОМАНДА /ADMINXP ADD
+    // ==========================================
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (command.getName().equalsIgnoreCase("adminxp")) {
+            if (!sender.hasPermission("op") && !sender.hasPermission("indep.admin")) {
+                sender.sendMessage("§cУ вас нет прав для использования этой команды.");
+                return true;
+            }
+            if (args.length < 3 || !args[0].equalsIgnoreCase("add")) {
+                sender.sendMessage("§cИспользование: /adminxp add <ник> <количество>");
+                return true;
+            }
+            
+            String targetName = args[1];
+            int amount;
+            try {
+                amount = Integer.parseInt(args[2]);
+            } catch (NumberFormatException e) {
+                sender.sendMessage("§cОшибка: Количество опыта должно быть числом.");
+                return true;
+            }
+
+            OfflinePlayer target = findOfflinePlayer(targetName);
+            if (target == null) {
+                sender.sendMessage("§cИгрок с ником " + targetName + " не найден на сервере.");
+                return true;
+            }
+
+            String discordId = linkedAccounts.get(target.getUniqueId());
+            if (discordId == null) {
+                sender.sendMessage("§cИгрок " + targetName + " не привязан к Discord! Опыт Battle Pass не может быть выдан.");
+                return true;
+            }
+
+            addXp(discordId, amount);
+            sender.sendMessage("§aУспешно выдано " + amount + " XP игроку " + target.getName() + "!");
+            return true;
+        }
+        return false;
+    }
+
     private void loadQuestConfig() {
         questsFile = new File(getDataFolder(), "quests.yml");
         if (!questsFile.exists()) {
@@ -375,25 +441,36 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
     private void loadQuestProgress() {
         ConfigurationSection dataSec = questProgressConfig.getConfigurationSection("data");
-        if (dataSec == null) return;
-        for (String discordId : dataSec.getKeys(false)) {
-            PlayerQuestData data = new PlayerQuestData();
-            data.date = dataSec.getString(discordId + ".date");
-            data.slots = new ArrayList<>();
-            ConfigurationSection slotsSec = dataSec.getConfigurationSection(discordId + ".slots");
-            if (slotsSec != null) {
-                for (String idx : slotsSec.getKeys(false)) {
-                    ConfigurationSection s = slotsSec.getConfigurationSection(idx);
-                    QuestSlot slot = new QuestSlot();
-                    slot.questId = s.getString("questId");
-                    slot.poolType = s.getString("poolType");
-                    slot.progress = s.getInt("progress");
-                    slot.completed = s.getBoolean("completed");
-                    slot.template = getQuestTemplate(slot.poolType, slot.questId);
-                    data.slots.add(slot);
+        if (dataSec != null) {
+            for (String discordId : dataSec.getKeys(false)) {
+                PlayerQuestData data = new PlayerQuestData();
+                data.date = dataSec.getString(discordId + ".date");
+                data.slots = new ArrayList<>();
+                ConfigurationSection slotsSec = dataSec.getConfigurationSection(discordId + ".slots");
+                if (slotsSec != null) {
+                    for (String idx : slotsSec.getKeys(false)) {
+                        ConfigurationSection s = slotsSec.getConfigurationSection(idx);
+                        QuestSlot slot = new QuestSlot();
+                        slot.questId = s.getString("questId");
+                        slot.poolType = s.getString("poolType");
+                        slot.progress = s.getInt("progress");
+                        slot.completed = s.getBoolean("completed");
+                        slot.template = getQuestTemplate(slot.poolType, slot.questId);
+                        data.slots.add(slot);
+                    }
                 }
+                playerQuestDataMap.put(discordId, data);
             }
-            playerQuestDataMap.put(discordId, data);
+        }
+        
+        ConfigurationSection globalSec = questProgressConfig.getConfigurationSection("global");
+        if (globalSec != null) {
+            globalQuestProgress = globalSec.getLong("progress", 0);
+            globalQuestCompleted = globalSec.getBoolean("completed", false);
+            List<String> parts = globalSec.getStringList("participants");
+            if (parts != null) {
+                globalQuestParticipants.addAll(parts);
+            }
         }
     }
 
@@ -412,6 +489,11 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 questProgressConfig.set(path + ".completed", slot.completed);
             }
         }
+        
+        questProgressConfig.set("global.progress", globalQuestProgress);
+        questProgressConfig.set("global.completed", globalQuestCompleted);
+        questProgressConfig.set("global.participants", new ArrayList<>(globalQuestParticipants));
+        
         try {
             questProgressConfig.save(questProgressFile);
         } catch (IOException e) {
@@ -534,6 +616,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     public void addQuestProgressByEvent(String discordId, String eventName, int amount) {
         PlayerQuestData data = playerQuestDataMap.get(discordId);
         if (data == null) return;
+        
+        // Индивидуальные квесты
         for (QuestSlot slot : data.slots) {
             if (slot.completed || slot.template == null) continue;
             if (slot.template.event != null && slot.template.event.equals(eventName)) {
@@ -548,6 +632,17 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 saveQuestProgress();
                 break;
             }
+        }
+        
+        // Глобальный квест
+        if (globalQuestEnabled && !globalQuestCompleted && globalQuestStat != null && globalQuestStat.equals(eventName)) {
+            globalQuestProgress += amount;
+            globalQuestParticipants.add(discordId);
+            if (globalQuestProgress >= globalQuestTarget) {
+                globalQuestProgress = globalQuestTarget;
+                completeGlobalQuest();
+            }
+            saveQuestProgress();
         }
     }
 
@@ -586,6 +681,33 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         });
     }
 
+    // ==========================================
+    //       ЗАВЕРШЕНИЕ ГЛОБАЛЬНОГО КВЕСТА
+    // ==========================================
+    private void completeGlobalQuest() {
+        globalQuestCompleted = true;
+        
+        for (String participantDiscordId : globalQuestParticipants) {
+            addXp(participantDiscordId, globalQuestRewardXp);
+            
+            UUID playerUuid = getUuidFromDiscord(participantDiscordId);
+            if (playerUuid != null) {
+                String playerName = Bukkit.getOfflinePlayer(playerUuid).getName();
+                if (playerName != null && globalQuestCommands != null && !globalQuestCommands.isEmpty()) {
+                    Bukkit.getScheduler().runTask(this, () -> {
+                        for (String cmd : globalQuestCommands) {
+                            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd.replace("{player}", playerName));
+                        }
+                    });
+                }
+            }
+        }
+        
+        if (jda != null) {
+            getLogger().info("Глобальный квест выполнен! Участники награждены.");
+        }
+    }
+
     public String makeProgressBar(int current, int max) {
         int bars = 10;
         int filled = Math.min((int) ((double) current / max * bars), bars);
@@ -612,6 +734,9 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }, initialDelay, TimeUnit.DAYS.toMillis(1), TimeUnit.MILLISECONDS);
     }
 
+    // ==========================================
+    //      ТРЕКЕР СТАТИСТИКИ (УЛУЧШЕННЫЙ)
+    // ==========================================
     private void startMinecraftStatTracker() {
         new BukkitRunnable() {
             @Override
@@ -620,17 +745,64 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     UUID uuid = player.getUniqueId();
                     String discordId = linkedAccounts.get(uuid);
                     if (discordId == null) continue;
+                    
                     PlayerQuestData data = playerQuestDataMap.get(discordId);
-                    if (data == null || data.slots.isEmpty()) continue;
-
-                    for (QuestSlot slot : data.slots) {
-                        if (slot.completed || slot.template == null) continue;
-                        if (slot.template.type.equals("mc_stat_delta") && slot.template.stat != null) {
-                            long delta = getStatDelta(player, slot.template.stat);
-                            if (delta > 0) {
-                                addQuestProgress(discordId, slot.questId, (int) delta);
+                    
+                    Set<String> statsToTrack = new HashSet<>();
+                    if (globalQuestEnabled && !globalQuestCompleted && globalQuestStat != null && globalQuestStat.startsWith("statistic_")) {
+                        statsToTrack.add(globalQuestStat);
+                    }
+                    
+                    if (data != null && !data.slots.isEmpty()) {
+                        for (QuestSlot slot : data.slots) {
+                            if (!slot.completed && slot.template != null && "mc_stat_delta".equals(slot.template.type) && slot.template.stat != null) {
+                                statsToTrack.add(slot.template.stat);
                             }
                         }
+                    }
+
+                    Map<String, Long> deltas = new HashMap<>();
+                    for (String stat : statsToTrack) {
+                        deltas.put(stat, getStatDelta(player, stat));
+                    }
+
+                    boolean saveNeeded = false;
+
+                    if (globalQuestEnabled && !globalQuestCompleted && globalQuestStat != null) {
+                        long d = deltas.getOrDefault(globalQuestStat, 0L);
+                        if (d > 0) {
+                            globalQuestProgress += d;
+                            globalQuestParticipants.add(discordId);
+                            saveNeeded = true;
+                            if (globalQuestProgress >= globalQuestTarget) {
+                                globalQuestProgress = globalQuestTarget;
+                                completeGlobalQuest();
+                            }
+                        }
+                    }
+
+                    if (data != null && !data.slots.isEmpty()) {
+                        for (QuestSlot slot : data.slots) {
+                            if (slot.completed || slot.template == null) continue;
+                            if ("mc_stat_delta".equals(slot.template.type) && slot.template.stat != null) {
+                                long d = deltas.getOrDefault(slot.template.stat, 0L);
+                                if (d > 0) {
+                                    slot.progress += d;
+                                    saveNeeded = true;
+                                    if (slot.progress >= slot.template.target) {
+                                        slot.progress = slot.template.target;
+                                        slot.completed = true;
+                                        addXp(discordId, slot.template.reward);
+                                        notifyQuestCompleted(discordId, slot);
+                                        executeQuestCommands(discordId, slot);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (saveNeeded) {
+                        saveQuestProgress();
                     }
                 }
             }
@@ -1461,21 +1633,20 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     }
 
     public OfflinePlayer findOfflinePlayer(String name) {
-        OfflinePlayer target = Bukkit.getOfflinePlayer(name);
-        if (target.getName() != null && (target.hasPlayedBefore() || target.isOnline())) return target;
-        
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
-            if (p.getName() != null && p.getName().equalsIgnoreCase(name) && (p.hasPlayedBefore() || p.isOnline())) {
-                return p;
-            }
+            if (p.getName() == null) continue;
+            String pName = p.getName();
+            
+            if (pName.equalsIgnoreCase(name)) return p;
+            if (pName.equalsIgnoreCase("0" + name)) return p;
+            if (pName.equalsIgnoreCase("." + name) || pName.equalsIgnoreCase("*" + name)) return p;
         }
-        
-        target = Bukkit.getOfflinePlayer("." + name);
-        if (target.getName() != null && (target.hasPlayedBefore() || target.isOnline())) return target;
-        
-        target = Bukkit.getOfflinePlayer("*" + name);
-        if (target.getName() != null && (target.hasPlayedBefore() || target.isOnline())) return target;
-        
+
+        OfflinePlayer fallback = Bukkit.getOfflinePlayer(name);
+        if (fallback != null && (fallback.hasPlayedBefore() || fallback.isOnline())) {
+            return fallback;
+        }
+
         return null;
     }
 
@@ -1484,7 +1655,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
             String name = p.getName();
             if (name == null) continue;
-            if (name.startsWith(".") || name.startsWith("*")) continue;
+            if (name.startsWith(".") || name.startsWith("*") || name.startsWith("0")) continue;
             OfflinePlayer existing = latestPlayers.get(name);
             if (existing == null || p.getLastSeen() > existing.getLastSeen()) {
                 latestPlayers.put(name, p);
@@ -1651,7 +1822,15 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 
                 long midnightUnix = java.time.LocalDate.now(plugin.questTimezone)
                         .plusDays(1).atStartOfDay(plugin.questTimezone).toEpochSecond();
-                embed.setDescription("🔄 Обновление <t:" + midnightUnix + ":R>\n*Выполняй задания, чтобы апать Paw Pass!*");
+                embed.setDescription("🔄 Обновление <t:" + midnightUnix + ":R>\n*Выполняй задания, чтобы апать Battle Pass!*");
+
+                if (plugin.globalQuestEnabled) {
+                    String status = plugin.globalQuestCompleted 
+                            ? "✅ Выполнено! Награды выданы." 
+                            : plugin.makeProgressBar((int)plugin.globalQuestProgress, (int)plugin.globalQuestTarget) + " **" + plugin.globalQuestProgress + "/" + plugin.globalQuestTarget + "**";
+                    
+                    embed.addField("🌍 ГЛОБАЛЬНАЯ ЦЕЛЬ", status + "\n💬 *" + plugin.globalQuestDesc + "*\n⚡ **Награда:** " + plugin.globalQuestRewardXp + " XP + Трофей", false);
+                }
 
                 if (slots.isEmpty()) {
                     embed.addField("Нет активных квестов", "Попробуйте перезайти на сервер.", false);
@@ -1743,13 +1922,16 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     return;
                 }
                 target = Bukkit.getOfflinePlayer(playerUuid);
+                if (!target.hasPlayedBefore() && !target.isOnline()) {
+                    event.getMessage().reply("❌ Ваш Minecraft-аккаунт не найден.").queue();
+                    return;
+                }
             } else {
                 target = plugin.findOfflinePlayer(targetName);
-            }
-
-            if (target == null || (!target.hasPlayedBefore() && !target.isOnline())) {
-                event.getMessage().reply("❌ Игрок не найден.").queue();
-                return;
+                if (target == null) {
+                    event.getMessage().reply("❌ Игрок не найден.").queue();
+                    return;
+                }
             }
 
             sendProfileEmbed(event.getChannel().asGuildMessageChannel(), target);
@@ -1759,10 +1941,9 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
             
             String pName = player.getName() != null ? player.getName() : "Unknown";
-            String avatarUrl = "[https://minotar.net/avatar/Steve/128](https://minotar.net/avatar/Steve/128)";
-            try {
-                avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + java.net.URLEncoder.encode(pName, "UTF-8") + "/128";
-            } catch (Exception ignored) {}
+            String cleanName = pName.replaceAll("[^a-zA-Z0-9_]", "");
+            if (cleanName.isEmpty()) cleanName = "Steve";
+            String avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + cleanName + "/128";
 
             embed.setAuthor(pName, null, avatarUrl);
             embed.setThumbnail(avatarUrl);
@@ -1837,16 +2018,15 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     String nick = event.getOption("ник").getAsString();
                     OfflinePlayer target = plugin.findOfflinePlayer(nick);
                     
-                    if (target == null || (!target.hasPlayedBefore() && !target.isOnline())) {
+                    if (target == null) {
                         event.getHook().sendMessage("❌ Игрок не найден.").queue();
                     } else {
                         EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
                         
                         String pName = target.getName() != null ? target.getName() : "Unknown";
-                        String avatarUrl = "[https://minotar.net/avatar/Steve/128](https://minotar.net/avatar/Steve/128)";
-                        try {
-                            avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + java.net.URLEncoder.encode(pName, "UTF-8") + "/128";
-                        } catch (Exception ignored) {}
+                        String cleanName = pName.replaceAll("[^a-zA-Z0-9_]", "");
+                        if (cleanName.isEmpty()) cleanName = "Steve";
+                        String avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + cleanName + "/128";
 
                         embed.setAuthor(pName, null, avatarUrl);
                         embed.setThumbnail(avatarUrl);
@@ -1885,10 +2065,9 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                             EmbedBuilder selfEmbed = new EmbedBuilder().setColor(new Color(0x5865F2));
                             
                             String pName = self.getName() != null ? self.getName() : "Unknown";
-                            String avatarUrl = "[https://minotar.net/avatar/Steve/128](https://minotar.net/avatar/Steve/128)";
-                            try {
-                                avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + java.net.URLEncoder.encode(pName, "UTF-8") + "/128";
-                            } catch (Exception ignored) {}
+                            String cleanName = pName.replaceAll("[^a-zA-Z0-9_]", "");
+                            if (cleanName.isEmpty()) cleanName = "Steve";
+                            String avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + cleanName + "/128";
 
                             selfEmbed.setAuthor(pName, null, avatarUrl);
                             selfEmbed.setThumbnail(avatarUrl);
@@ -1927,7 +2106,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
                         EmbedBuilder rankEmbed = new EmbedBuilder();
                         rankEmbed.setColor(new Color(0xFFD700)); 
-                        rankEmbed.setAuthor("Paw Pass: Сезон 1", null, event.getUser().getEffectiveAvatarUrl());
+                        rankEmbed.setAuthor("Боевой Пропуск: Сезон 1", null, event.getUser().getEffectiveAvatarUrl());
                         
                         rankEmbed.addField("⭐ Текущий уровень: " + currentLevel, 
                                     bar.toString() + " **" + String.format("%.0f", percent * 100) + "%**\n" +
@@ -1967,6 +2146,14 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     long midnightUnix = java.time.LocalDate.now(plugin.questTimezone)
                             .plusDays(1).atStartOfDay(plugin.questTimezone).toEpochSecond();
                     qEmbed.setDescription("🔄 Обновление <t:" + midnightUnix + ":R>\n*Выполняй задания, чтобы апать Battle Pass!*");
+
+                    if (plugin.globalQuestEnabled) {
+                        String status = plugin.globalQuestCompleted 
+                                ? "✅ Выполнено! Награды выданы." 
+                                : plugin.makeProgressBar((int)plugin.globalQuestProgress, (int)plugin.globalQuestTarget) + " **" + plugin.globalQuestProgress + "/" + plugin.globalQuestTarget + "**";
+                        
+                        qEmbed.addField("🌍 ГЛОБАЛЬНАЯ ЦЕЛЬ", status + "\n💬 *" + plugin.globalQuestDesc + "*\n⚡ **Награда:** " + plugin.globalQuestRewardXp + " XP + Трофей", false);
+                    }
 
                     if (qSlots.isEmpty()) {
                         qEmbed.addField("Нет активных квестов", "Попробуйте перезайти на сервер.", false);
