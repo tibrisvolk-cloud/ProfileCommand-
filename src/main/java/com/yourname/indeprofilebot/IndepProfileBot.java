@@ -79,7 +79,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private String linkKickMessage;
     private String verifyKickMessage;
     private final Map<String, String> linkCodes = new ConcurrentHashMap<>();
-    public final Map<UUID, String> linkedAccounts = new ConcurrentHashMap<>();   // UUID -> DiscordId
+    public final Map<UUID, String> linkedAccounts = new ConcurrentHashMap<>();
     private final Map<UUID, PendingVerification> pendingVerifications = new ConcurrentHashMap<>();
     private final Map<UUID, SessionInfo> sessions = new ConcurrentHashMap<>();
     private File linkedFile;
@@ -108,7 +108,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     public boolean levelsEnabled;
     public LevelConfig levelConfig;
     private String levelUpChannelId;
-    private final Map<String, LevelData> levelCache = new ConcurrentHashMap<>();  // ключ = uuid.toString()
+    private final Map<String, LevelData> levelCache = new ConcurrentHashMap<>();
     private File levelsFile;
     private FileConfiguration levelsConfig;
 
@@ -131,8 +131,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private final Map<String, QuestTemplate> rarePool = new LinkedHashMap<>();
     private final Map<String, QuestTemplate> legendaryPool = new LinkedHashMap<>();
 
-    public final Map<String, PlayerQuestData> playerQuestDataMap = new ConcurrentHashMap<>(); // ключ = discordId
-    private final Map<String, Map<String, Long>> statSnapshots = new ConcurrentHashMap<>();   // ключ = uuid.toString()
+    public final Map<String, PlayerQuestData> playerQuestDataMap = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Long>> statSnapshots = new ConcurrentHashMap<>();
 
     private File questProgressFile;
     private FileConfiguration questProgressConfig;
@@ -305,8 +305,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     Commands.slash("me", "Показать мой профиль"),
                     Commands.slash("link", "Привязать Minecraft аккаунт")
                         .addOption(OptionType.STRING, "код", "Код из кик-сообщения", true),
-                    Commands.slash("unlink", "Отвязать Minecraft аккаунт")
-                        .addOption(OptionType.STRING, "ник", "Никнейм игрока", true),
                     Commands.slash("rank", "Показать PawPass и опыт"),
                     Commands.slash("quests", "Ежедневные квесты")
                 ).queue();
@@ -416,7 +414,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
             sessions.remove(uuid);
             pendingVerifications.remove(uuid);
-            // Сбрасываем ник в Discord
             if (!guildId.isEmpty() && jda != null) {
                 Guild guild = jda.getGuildById(guildId);
                 if (guild != null) {
@@ -433,7 +430,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         return false;
     }
 
-    // Вспомогательный метод получения UUID по Discord ID
     private UUID getUuidByDiscord(String discordId) {
         for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
             if (entry.getValue().equals(discordId)) {
@@ -1205,7 +1201,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
         String discordId = event.getAuthor().getId();
 
-        // Запрет на привязку одного Discord к нескольким аккаунтам
         for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
             if (entry.getValue().equals(discordId)) {
                 String existingName = Bukkit.getOfflinePlayer(entry.getKey()).getName();
@@ -1880,8 +1875,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 return;
             }
 
-            // !unlink удалён – игроки не могут отвязываться самостоятельно
-
             if (lower.equals("!me")) {
                 showProfile(event, null, true);
                 return;
@@ -2183,7 +2176,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     break;
                 case "link":
                 case "unlink":
-                    event.reply("ℹ️ Пожалуйста, используйте текстовую команду `!link <код>` или `!unlink`.").setEphemeral(true).queue();
+                    event.reply("ℹ️ Пожалуйста, используйте текстовую команду `!link <код>` или обратитесь к администратору для отвязки.").setEphemeral(true).queue();
                     break;
             }
         }
@@ -2213,9 +2206,16 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 state.category = componentId.substring(8);
                 state.page = 0;
             } else if (componentId.startsWith("top_page_")) {
-                String[] parts = componentId.substring(9).split("_");
-                String cat = parts[0];
-                int newPage = Integer.parseInt(parts[1]);
+                String data = componentId.substring(9);
+                int lastUnderscore = data.lastIndexOf('_');
+                if (lastUnderscore == -1) return;
+                String cat = data.substring(0, lastUnderscore);
+                int newPage;
+                try {
+                    newPage = Integer.parseInt(data.substring(lastUnderscore + 1));
+                } catch (NumberFormatException ex) {
+                    return;
+                }
                 if (cat.equals(state.category)) state.page = newPage;
             }
 
