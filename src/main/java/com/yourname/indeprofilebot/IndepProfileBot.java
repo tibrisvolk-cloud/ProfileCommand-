@@ -1654,7 +1654,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
             String name = p.getName();
             if (name == null) continue;
-            if (name.startsWith(".") || name.startsWith("*") || name.startsWith("0")) continue;
+            if (name.startsWith(".") || name.startsWith("*") continue;
             OfflinePlayer existing = latestPlayers.get(name);
             if (existing == null || p.getLastSeen() > existing.getLastSeen()) {
                 latestPlayers.put(name, p);
