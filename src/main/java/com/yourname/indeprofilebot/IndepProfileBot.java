@@ -79,7 +79,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private String linkKickMessage;
     private String verifyKickMessage;
     private final Map<String, String> linkCodes = new ConcurrentHashMap<>();
-    public final Map<UUID, String> linkedAccounts = new ConcurrentHashMap<>();
+    public final Map<UUID, String> linkedAccounts = new ConcurrentHashMap<>();   // UUID -> DiscordId
     private final Map<UUID, PendingVerification> pendingVerifications = new ConcurrentHashMap<>();
     private final Map<UUID, SessionInfo> sessions = new ConcurrentHashMap<>();
     private File linkedFile;
@@ -104,11 +104,11 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private int recordsUpdateInterval;
     private String recordsMessageId;
 
-    // Система уровней
+    // Система уровней (PawPass) – хранится по UUID
     public boolean levelsEnabled;
     public LevelConfig levelConfig;
     private String levelUpChannelId;
-    private final Map<String, LevelData> levelCache = new ConcurrentHashMap<>();
+    private final Map<String, LevelData> levelCache = new ConcurrentHashMap<>();  // ключ = uuid.toString()
     private File levelsFile;
     private FileConfiguration levelsConfig;
 
@@ -131,8 +131,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private final Map<String, QuestTemplate> rarePool = new LinkedHashMap<>();
     private final Map<String, QuestTemplate> legendaryPool = new LinkedHashMap<>();
 
-    public final Map<String, PlayerQuestData> playerQuestDataMap = new ConcurrentHashMap<>();
-    private final Map<String, Map<String, Long>> statSnapshots = new ConcurrentHashMap<>();
+    public final Map<String, PlayerQuestData> playerQuestDataMap = new ConcurrentHashMap<>(); // ключ = discordId
+    private final Map<String, Map<String, Long>> statSnapshots = new ConcurrentHashMap<>();   // ключ = uuid.toString()
 
     private File questProgressFile;
     private FileConfiguration questProgressConfig;
@@ -305,7 +305,8 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     Commands.slash("me", "Показать мой профиль"),
                     Commands.slash("link", "Привязать Minecraft аккаунт")
                         .addOption(OptionType.STRING, "код", "Код из кик-сообщения", true),
-                    Commands.slash("unlink", "Отвязать Minecraft аккаунт"),
+                    Commands.slash("unlink", "Отвязать Minecraft аккаунт")
+                        .addOption(OptionType.STRING, "ник", "Никнейм игрока", true),
                     Commands.slash("rank", "Показать PawPass и опыт"),
                     Commands.slash("quests", "Ежедневные квесты")
                 ).queue();
@@ -356,7 +357,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     }
 
     // ==========================================
-    //          КОМАНДА /ADMINXP ADD
+    //          КОМАНДЫ /ADMINXP И /UNLINKPLAYER
     // ==========================================
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
@@ -385,17 +386,61 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 return true;
             }
 
-            String discordId = linkedAccounts.get(target.getUniqueId());
-            if (discordId == null) {
-                sender.sendMessage("§cИгрок " + targetName + " не привязан к Discord! Опыт PawPass не может быть выдан.");
-                return true;
-            }
-
-            addXp(discordId, amount);
+            addXp(target.getUniqueId(), amount);
             sender.sendMessage("§aУспешно выдано " + amount + " XP игроку " + target.getName() + "!");
             return true;
         }
+        else if (command.getName().equalsIgnoreCase("unlinkplayer")) {
+            if (!sender.isOp() && !sender.hasPermission("indep.admin")) {
+                sender.sendMessage("§cУ вас нет прав.");
+                return true;
+            }
+            if (args.length < 1) {
+                sender.sendMessage("§cИспользование: /unlinkplayer <ник>");
+                return true;
+            }
+            OfflinePlayer target = findOfflinePlayer(args[0]);
+            if (target == null) {
+                sender.sendMessage("§cИгрок не найден.");
+                return true;
+            }
+            UUID uuid = target.getUniqueId();
+            String discordId = linkedAccounts.remove(uuid);
+            if (discordId == null) {
+                sender.sendMessage("§cИгрок не привязан.");
+                return true;
+            }
+            linkedConfig.set(uuid.toString(), null);
+            try { linkedConfig.save(linkedFile); } catch (IOException e) {
+                getLogger().warning("Ошибка сохранения linked.yml");
+            }
+            sessions.remove(uuid);
+            pendingVerifications.remove(uuid);
+            // Сбрасываем ник в Discord
+            if (!guildId.isEmpty() && jda != null) {
+                Guild guild = jda.getGuildById(guildId);
+                if (guild != null) {
+                    guild.retrieveMemberById(discordId).queue(member -> {
+                        if (member != null && member.getNickname() != null) {
+                            member.modifyNickname(null).queue();
+                        }
+                    });
+                }
+            }
+            sender.sendMessage("§aПривязка для " + target.getName() + " удалена.");
+            return true;
+        }
         return false;
+    }
+
+    // Вспомогательный метод получения UUID по Discord ID
+    private UUID getUuidByDiscord(String discordId) {
+        for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
+            if (entry.getValue().equals(discordId)) {
+                return entry.getKey();
+            }
+        }
+        return null;
     }
 
     private void loadQuestConfig() {
@@ -603,7 +648,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 if (slot.progress >= slot.template.target) {
                     slot.progress = slot.template.target;
                     slot.completed = true;
-                    addXp(discordId, slot.template.reward);
+                    addXp(getUuidByDiscord(discordId), slot.template.reward);
                     notifyQuestCompleted(discordId, slot);
                     executeQuestCommands(discordId, slot);
                 }
@@ -624,7 +669,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 if (slot.progress >= slot.template.target) {
                     slot.progress = slot.template.target;
                     slot.completed = true;
-                    addXp(discordId, slot.template.reward);
+                    addXp(getUuidByDiscord(discordId), slot.template.reward);
                     notifyQuestCompleted(discordId, slot);
                     executeQuestCommands(discordId, slot);
                 }
@@ -679,14 +724,11 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         });
     }
 
-    // ==========================================
-    //       ЗАВЕРШЕНИЕ ГЛОБАЛЬНОГО КВЕСТА
-    // ==========================================
     private void completeGlobalQuest() {
         globalQuestCompleted = true;
         
         for (String participantDiscordId : globalQuestParticipants) {
-            addXp(participantDiscordId, globalQuestRewardXp);
+            addXp(getUuidByDiscord(participantDiscordId), globalQuestRewardXp);
             
             UUID playerUuid = getUuidFromDiscord(participantDiscordId);
             if (playerUuid != null) {
@@ -732,9 +774,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }, initialDelay, TimeUnit.DAYS.toMillis(1), TimeUnit.MILLISECONDS);
     }
 
-    // ==========================================
-    //      ТРЕКЕР СТАТИСТИКИ (УЛУЧШЕННЫЙ)
-    // ==========================================
     private void startMinecraftStatTracker() {
         new BukkitRunnable() {
             @Override
@@ -790,7 +829,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                                     if (slot.progress >= slot.template.target) {
                                         slot.progress = slot.template.target;
                                         slot.completed = true;
-                                        addXp(discordId, slot.template.reward);
+                                        addXp(uuid, slot.template.reward);
                                         notifyQuestCompleted(discordId, slot);
                                         executeQuestCommands(discordId, slot);
                                     }
@@ -971,7 +1010,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
 
             if (levelsEnabled && levelConfig.levelRewards != null && !levelConfig.levelRewards.isEmpty()) {
-                grantRewards(player, discordId);
+                grantRewards(player);
             }
         }
     }
@@ -983,7 +1022,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             UUID uuid = player.getUniqueId();
             String discordId = linkedAccounts.get(uuid);
             if (discordId != null) {
-                LevelData data = getLevelData(discordId);
+                LevelData data = getLevelData(uuid);
                 String format = levelConfig.minecraftChatPrefixFormat
                         .replace("{level}", String.valueOf(data.level));
                 format = ChatColor.translateAlternateColorCodes('&', format);
@@ -1004,7 +1043,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         mcChatCooldown.put(uuid, now);
         String discordId = linkedAccounts.get(uuid);
         if (discordId != null) {
-            addXp(discordId, levelConfig.mcChatXpPerMessage);
+            addXp(uuid, levelConfig.mcChatXpPerMessage);
             addQuestProgress(discordId, "mc_chat", 1);
         }
     }
@@ -1166,10 +1205,11 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
         String discordId = event.getAuthor().getId();
 
+        // Запрет на привязку одного Discord к нескольким аккаунтам
         for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
             if (entry.getValue().equals(discordId)) {
                 String existingName = Bukkit.getOfflinePlayer(entry.getKey()).getName();
-                event.getMessage().reply("Ваш Discord уже привязан к аккаунту `" + existingName + "`. Сначала отвяжите его командой `!unlink`.").queue();
+                event.getMessage().reply("Ваш Discord уже привязан к аккаунту `" + existingName + "`. Обратитесь к администратору для отвязки.").queue();
                 return;
             }
         }
@@ -1178,53 +1218,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         linkedConfig.set(uuid.toString(), discordId);
         try { linkedConfig.save(linkedFile); } catch (IOException e) { getLogger().warning("Ошибка сохранения linked.yml"); }
         event.getMessage().reply("✅ Аккаунт привязан! Можете заходить.").queue();
-    }
-
-    public void handleUnlinkCommand(MessageReceivedEvent event) {
-        String discordId = event.getAuthor().getId();
-        UUID uuidToRemove = null;
-        for (Map.Entry<UUID, String> entry : linkedAccounts.entrySet()) {
-            if (entry.getValue().equals(discordId)) {
-                uuidToRemove = entry.getKey();
-                break;
-            }
-        }
-        if (uuidToRemove == null) {
-            event.getMessage().reply("Ваш Discord не привязан ни к одному аккаунту.").queue();
-            return;
-        }
-
-        Player onlinePlayer = Bukkit.getPlayer(uuidToRemove);
-        if (onlinePlayer != null && onlinePlayer.isOnline()) {
-            String kickMessage = ChatColor.RED + "Ваш Discord-аккаунт был отвязан.\n" +
-                    ChatColor.WHITE + "Перезайдите и привяжите новый аккаунт.";
-            Bukkit.getScheduler().runTask(this, () -> onlinePlayer.kickPlayer(kickMessage));
-        }
-
-        linkedAccounts.remove(uuidToRemove);
-        linkedConfig.set(uuidToRemove.toString(), null);
-        try { linkedConfig.save(linkedFile); } catch (IOException e) { getLogger().warning("Ошибка сохранения linked.yml"); }
-        sessions.remove(uuidToRemove);
-        pendingVerifications.remove(uuidToRemove);
-
-        if (!guildId.isEmpty()) {
-            Guild guild = jda.getGuildById(guildId);
-            if (guild != null) {
-                guild.retrieveMemberById(discordId).queue(member -> {
-                    if (!canModifyMember(member)) return;
-                    if (!playerRoleId.isEmpty()) {
-                        Role role = guild.getRoleById(playerRoleId);
-                        if (role != null && member.getRoles().contains(role)) {
-                            guild.removeRoleFromMember(member, role).queue();
-                        }
-                    }
-                    if (syncNick && member.getNickname() != null) {
-                        guild.modifyNickname(member, null).queue();
-                    }
-                });
-            }
-        }
-        event.getMessage().reply("Привязка удалена.").queue();
     }
 
     public void handleConfirmButton(ButtonInteractionEvent event, UUID uuid) {
@@ -1279,8 +1272,9 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 
-    public LevelData getLevelData(String discordId) {
-        return levelCache.computeIfAbsent(discordId, k -> {
+    // ==================== РАБОТА С УРОВНЯМИ (UUID) ====================
+    public LevelData getLevelData(UUID uuid) {
+        return levelCache.computeIfAbsent(uuid.toString(), k -> {
             LevelData data = new LevelData();
             data.xp = levelsConfig.getInt(k + ".xp", 0);
             data.level = levelsConfig.getInt(k + ".level", 1);
@@ -1292,13 +1286,14 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         });
     }
 
-    private void saveLevelData(String discordId, LevelData data) {
-        levelsConfig.set(discordId + ".xp", data.xp);
-        levelsConfig.set(discordId + ".level", data.level);
-        levelsConfig.set(discordId + ".totalXp", data.totalXp);
-        levelsConfig.set(discordId + ".lastTextXp", data.lastTextXp);
-        levelsConfig.set(discordId + ".lastLevelUp", data.lastLevelUp);
-        levelsConfig.set(discordId + ".highestRewardClaimed", data.highestRewardClaimed);
+    private void saveLevelData(UUID uuid, LevelData data) {
+        String key = uuid.toString();
+        levelsConfig.set(key + ".xp", data.xp);
+        levelsConfig.set(key + ".level", data.level);
+        levelsConfig.set(key + ".totalXp", data.totalXp);
+        levelsConfig.set(key + ".lastTextXp", data.lastTextXp);
+        levelsConfig.set(key + ".lastLevelUp", data.lastLevelUp);
+        levelsConfig.set(key + ".highestRewardClaimed", data.highestRewardClaimed);
         try { levelsConfig.save(levelsFile); } catch (IOException e) {
             getLogger().warning("Не удалось сохранить levels.yml");
         }
@@ -1308,8 +1303,9 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         return (int) (levelConfig.base * Math.pow(level, levelConfig.exponent));
     }
 
-    public void addXp(String discordId, int amount) {
-        LevelData data = getLevelData(discordId);
+    public void addXp(UUID uuid, int amount) {
+        if (uuid == null) return;
+        LevelData data = getLevelData(uuid);
         data.xp += amount;
         data.totalXp += amount;
         
@@ -1323,24 +1319,28 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
         if (leveledUp) {
             data.lastLevelUp = System.currentTimeMillis();
-            notifyLevelUp(discordId, data.level);
+            String discordId = linkedAccounts.get(uuid);
+            if (discordId != null) {
+                notifyLevelUp(discordId, data.level);
+            }
             
-            UUID playerUuid = getUuidFromDiscord(discordId);
-            if (playerUuid != null) {
-                Player player = Bukkit.getPlayer(playerUuid);
-                if (player != null && player.isOnline()) {
-                    player.sendMessage(ChatColor.GOLD + "🎉 Поздравляем! Вы достигли " + ChatColor.GREEN + data.level + " уровня PawPass!" + ChatColor.GOLD + " Продолжайте в том же духе!");
-                    player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
-                    grantRewards(player, discordId);
-                }
+            Player player = Bukkit.getPlayer(uuid);
+            if (player != null && player.isOnline()) {
+                player.sendMessage(ChatColor.GOLD + "🎉 Поздравляем! Вы достигли " + ChatColor.GREEN + data.level + " уровня PawPass!" + ChatColor.GOLD + " Продолжайте в том же духе!");
+                player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
+                grantRewards(player);
             }
         }
-        saveLevelData(discordId, data);
-        checkLevelRoles(discordId, data.level);
+        saveLevelData(uuid, data);
+        String dId = linkedAccounts.get(uuid);
+        if (dId != null) {
+            checkLevelRoles(dId, data.level);
+        }
     }
 
-    private void grantRewards(Player player, String discordId) {
-        LevelData data = getLevelData(discordId);
+    private void grantRewards(Player player) {
+        UUID uuid = player.getUniqueId();
+        LevelData data = getLevelData(uuid);
         int currentLevel = data.level;
         int highestClaimed = data.highestRewardClaimed;
         if (currentLevel <= highestClaimed) return;
@@ -1356,7 +1356,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
         }
         data.highestRewardClaimed = currentLevel;
-        saveLevelData(discordId, data);
+        saveLevelData(uuid, data);
     }
 
     private void notifyLevelUp(String discordId, int newLevel) {
@@ -1440,9 +1440,12 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 if (realMembers.size() < levelConfig.voiceMinMembers) continue;
 
                 for (Member member : realMembers) {
-                    String id = member.getId();
-                    int total = voiceTotalSamples.getOrDefault(id, 0);
-                    int unmuted = voiceUnmutedSamples.getOrDefault(id, 0);
+                    String discordId = member.getId();
+                    UUID uuid = getUuidByDiscord(discordId);
+                    if (uuid == null) continue;
+
+                    int total = voiceTotalSamples.getOrDefault(discordId, 0);
+                    int unmuted = voiceUnmutedSamples.getOrDefault(discordId, 0);
 
                     if (total > 0) {
                         double speakingFraction = (double) unmuted / total;
@@ -1452,11 +1455,11 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                             xpPerMinute *= levelConfig.voiceStreamMultiplier;
                         }
                         int minutes = levelConfig.voiceCheckInterval;
-                        addXp(id, (int) (xpPerMinute * minutes));
+                        addXp(uuid, (int) (xpPerMinute * minutes));
 
-                        addQuestProgress(id, "voice", minutes);
+                        addQuestProgress(discordId, "voice", minutes);
                         if (member.getVoiceState() != null && member.getVoiceState().isStream()) {
-                            addQuestProgress(id, "voice_stream", minutes);
+                            addQuestProgress(discordId, "voice_stream", minutes);
                         }
                     }
                 }
@@ -1475,13 +1478,16 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         if (content.length() < levelConfig.textMinLength) return;
 
         String discordId = event.getAuthor().getId();
-        LevelData data = getLevelData(discordId);
+        UUID uuid = getUuidByDiscord(discordId);
+        if (uuid == null) return;
+
+        LevelData data = getLevelData(uuid);
         long now = System.currentTimeMillis();
         if (now - data.lastTextXp < TimeUnit.SECONDS.toMillis(levelConfig.textCooldownSeconds)) return;
 
         data.lastTextXp = now;
-        addXp(discordId, levelConfig.textXpPerMessage);
-        saveLevelData(discordId, data);
+        addXp(uuid, levelConfig.textXpPerMessage);
+        saveLevelData(uuid, data);
     }
 
     private long parseStatistic(String raw) {
@@ -1570,17 +1576,17 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 else return "—";
             }
             case "_level_": {
-                String discordId = linkedAccounts.get(player.getUniqueId());
-                if (discordId != null && levelsEnabled) {
-                    return String.valueOf(getLevelData(discordId).level);
+                UUID uuid = player.getUniqueId();
+                if (levelsEnabled) {
+                    return String.valueOf(getLevelData(uuid).level);
                 } else {
                     return "—";
                 }
             }
             case "_xp_": {
-                String discordId = linkedAccounts.get(player.getUniqueId());
-                if (discordId != null && levelsEnabled) {
-                    LevelData data = getLevelData(discordId);
+                UUID uuid = player.getUniqueId();
+                if (levelsEnabled) {
+                    LevelData data = getLevelData(uuid);
                     int next = getXpForLevel(data.level + 1);
                     return data.xp + " / " + next;
                 } else {
@@ -1671,17 +1677,11 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             
             long numeric;
             if (placeholder.equals("_level_")) {
-                String discordId = linkedAccounts.get(p.getUniqueId());
-                if (discordId != null) {
-                    LevelData data = getLevelData(discordId);
-                    numeric = data.totalXp; 
-                    lastLevelUpTimes.put(name, data.lastLevelUp);
-                    formattedValues.put(name, data.level + " Ур. (" + data.totalXp + " XP)");
-                } else {
-                    numeric = 0;
-                    lastLevelUpTimes.put(name, 0L);
-                    formattedValues.put(name, "0 Ур. (0 XP)");
-                }
+                UUID uuid = p.getUniqueId();
+                LevelData data = getLevelData(uuid);
+                numeric = data.totalXp; 
+                lastLevelUpTimes.put(name, data.lastLevelUp);
+                formattedValues.put(name, data.level + " Ур. (" + data.totalXp + " XP)");
             } else if (placeholder.equals("statistic_time_played")) {
                 numeric = parsePlaytimeToMinutes(rawValue);
                 formattedValues.put(name, formatCategoryValue(categoryKey, rawValue, numeric));
@@ -1880,10 +1880,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 return;
             }
 
-            if (lower.equals("!unlink") && plugin.twoFactorEnabled) {
-                plugin.handleUnlinkCommand(event);
-                return;
-            }
+            // !unlink удалён – игроки не могут отвязываться самостоятельно
 
             if (lower.equals("!me")) {
                 showProfile(event, null, true);
@@ -1961,7 +1958,12 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 return;
             }
             String discordId = event.getAuthor().getId();
-            LevelData data = plugin.getLevelData(discordId);
+            UUID uuid = plugin.getUuidByDiscord(discordId);
+            if (uuid == null) {
+                event.getMessage().reply("❌ Ваш Discord не привязан к аккаунту Minecraft.").queue();
+                return;
+            }
+            LevelData data = plugin.getLevelData(uuid);
             
             int currentLevel = data.level;
             int nextLevelXp = plugin.getXpForLevel(currentLevel + 1);
@@ -2076,7 +2078,12 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                         event.getHook().sendMessage("❌ Система уровней отключена.").queue();
                     } else {
                         String userId = event.getUser().getId();
-                        LevelData data = plugin.getLevelData(userId);
+                        UUID uuid = plugin.getUuidByDiscord(userId);
+                        if (uuid == null) {
+                            event.getHook().sendMessage("❌ Ваш Discord не привязан к Minecraft.").queue();
+                            break;
+                        }
+                        LevelData data = plugin.getLevelData(uuid);
                         
                         int currentLevel = data.level;
                         int nextLevelXp = plugin.getXpForLevel(currentLevel + 1);
