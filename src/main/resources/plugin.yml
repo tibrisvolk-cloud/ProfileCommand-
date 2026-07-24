@@ -3,3 +3,10 @@ version: 1.0
 main: com.yourname.indeprofilebot.IndepProfileBot
 api-version: "1.21"
 depend: [PlaceholderAPI]
+commands:
+  adminxp:
+    description: Выдать опыт PawPass
+    usage: /adminxp add <ник> <количество>
+  unlinkplayer:
+    description: Отвязать игрока от Discord (админ)
+    usage: /unlinkplayer <ник>
