@@ -1669,7 +1669,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         }
     }
 }
-
     public OfflinePlayer findOfflinePlayer(String name) {
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
             if (p.getName() == null) continue;
