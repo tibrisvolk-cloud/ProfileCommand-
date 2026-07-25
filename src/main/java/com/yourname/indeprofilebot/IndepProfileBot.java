@@ -1667,8 +1667,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 return result;
             }
         }
-    }
-}
+
     public OfflinePlayer findOfflinePlayer(String name) {
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
             if (p.getName() == null) continue;
@@ -2347,5 +2346,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     public static class PlayerQuestData {
         public String date;
         public List<QuestSlot> slots = new ArrayList<>();
+    }
+}
     }
 }
