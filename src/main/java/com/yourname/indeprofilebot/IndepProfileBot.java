@@ -918,7 +918,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         ItemStack item = event.getItem();
         if (item.getType() == Material.POTION || item.getType() == Material.LINGERING_POTION || item.getType() == Material.SPLASH_POTION) {
             PotionMeta meta = (PotionMeta) item.getItemMeta();
-            if (meta != null && meta.getBasePotionType() != null && meta.getBasePotionType().getEffectType() != null) {
+            if (meta != null && (meta.hasCustomEffects() || meta.getBasePotionType() != PotionType.WATER)) {
                 handleQuestEvent(event.getPlayer(), "player_drink_potion_with_effect", 1);
             }
         }
@@ -952,7 +952,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onQuestFirework(ProjectileLaunchEvent event) {
-        if (event.getEntity() instanceof FireworkRocket && event.getEntity().getShooter() instanceof Player player) {
+        if (event.getEntity() instanceof Firework && event.getEntity().getShooter() instanceof Player player) {
             handleQuestEvent(player, "player_firework_launch", 1);
         }
     }
@@ -1985,7 +1985,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         private void sendProfileEmbed(GuildMessageChannel channel, OfflinePlayer player) {
             EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
             String playerName = player.getName() != null ? player.getName() : "Unknown";
-            String avatarUrl = "https://minotar.net/avatar/" + playerName + "/128";
+            String avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + playerName + "/128";
             embed.setAuthor(playerName, null, avatarUrl);
             embed.setThumbnail(avatarUrl);
             for (Map<?, ?> fieldMap : plugin.profileFields) {
@@ -2068,7 +2068,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     } else {
                         EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
                         String pName = target.getName() != null ? target.getName() : "Unknown";
-                        String avatarUrl = "https://minotar.net/avatar/" + pName + "/128";
+                        String avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + pName + "/128";
                         embed.setAuthor(pName, null, avatarUrl);
                         embed.setThumbnail(avatarUrl);
                         for (Map<?, ?> fieldMap : plugin.profileFields) {
@@ -2104,7 +2104,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                         } else {
                             EmbedBuilder selfEmbed = new EmbedBuilder().setColor(new Color(0x5865F2));
                             String pName = self.getName() != null ? self.getName() : "Unknown";
-                            String avatarUrl = "https://minotar.net/avatar/" + pName + "/128";
+                            String avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + pName + "/128";
                             selfEmbed.setAuthor(pName, null, avatarUrl);
                             selfEmbed.setThumbnail(avatarUrl);
                             for (Map<?, ?> fieldMap : plugin.profileFields) {
