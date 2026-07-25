@@ -30,20 +30,17 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
-import org.bukkit.entity.EntityType;
-import org.bukkit.entity.Minecart;
-import org.bukkit.entity.Player;
+import org.bukkit.entity.*;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.event.entity.EntityDeathEvent;
-import org.bukkit.event.entity.EntityTameEvent;
+import org.bukkit.event.entity.*;
+import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.player.*;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.PotionMeta;
-import org.bukkit.potion.PotionType;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.potion.PotionType;
 import org.bukkit.scheduler.BukkitRunnable;
 
 import java.awt.Color;
@@ -327,7 +324,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }.runTaskTimer(this, 100L, 20L * 60 * recordsUpdateInterval);
         }
 
-        if (levelsEnabled && levelConfig.voiceXpEnabled) {
+        if (levelsEnabled) {
             new BukkitRunnable() {
                 @Override
                 public void run() {
@@ -921,18 +918,50 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         ItemStack item = event.getItem();
         if (item.getType() == Material.POTION || item.getType() == Material.LINGERING_POTION || item.getType() == Material.SPLASH_POTION) {
             PotionMeta meta = (PotionMeta) item.getItemMeta();
-            if (meta != null && (meta.hasCustomEffects() || meta.getBasePotionType() != PotionType.WATER)) {
+            if (meta != null && meta.getBasePotionType() != null && meta.getBasePotionType().getEffectType() != null) {
                 handleQuestEvent(event.getPlayer(), "player_drink_potion_with_effect", 1);
             }
         }
     }
 
     @EventHandler
-    public void onQuestMinecartRide(PlayerMoveEvent event) {
-        if (event.getPlayer().isInsideVehicle() && event.getPlayer().getVehicle() instanceof Minecart) {
-            double moved = event.getFrom().distanceSquared(event.getTo());
-            if (moved > 0.0001) {
-                handleQuestEvent(event.getPlayer(), "player_minecart_distance", 1);
+    public void onQuestEat(PlayerItemConsumeEvent event) {
+        if (event.getItem().getType().isEdible()) {
+            handleQuestEvent(event.getPlayer(), "player_eat_food", 1);
+        }
+    }
+
+    @EventHandler
+    public void onQuestBreed(EntityBreedEvent event) {
+        if (event.getBreeder() instanceof Player player) {
+            handleQuestEvent(player, "player_breed", 1);
+        }
+    }
+
+    @EventHandler
+    public void onQuestShear(PlayerShearEntityEvent event) {
+        handleQuestEvent(event.getPlayer(), "player_shear", 1);
+    }
+
+    @EventHandler
+    public void onQuestTeleport(PlayerTeleportEvent event) {
+        if (event.getCause() == PlayerTeleportEvent.TeleportCause.ENDER_PEARL) {
+            handleQuestEvent(event.getPlayer(), "player_ender_pearl", 1);
+        }
+    }
+
+    @EventHandler
+    public void onQuestFirework(ProjectileLaunchEvent event) {
+        if (event.getEntity() instanceof FireworkRocket && event.getEntity().getShooter() instanceof Player player) {
+            handleQuestEvent(player, "player_firework_launch", 1);
+        }
+    }
+
+    @EventHandler
+    public void onQuestCraft(CraftItemEvent event) {
+        if (event.getWhoClicked() instanceof Player player) {
+            if (event.getRecipe().getResult().getType() == Material.MINECART) {
+                handleQuestEvent(player, "player_craft_minecart", 1);
             }
         }
     }
@@ -1334,6 +1363,11 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     }
 
     private void grantRewards(Player player) {
+        if (!Bukkit.isPrimaryThread()) {
+            Bukkit.getScheduler().runTask(this, () -> grantRewards(player));
+            return;
+        }
+
         UUID uuid = player.getUniqueId();
         LevelData data = getLevelData(uuid);
         int currentLevel = data.level;
@@ -1403,7 +1437,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     }
 
     private void sampleVoiceActivity() {
-        if (!levelsEnabled || !levelConfig.voiceXpEnabled) return;
+        if (!levelsEnabled) return;
         for (Guild guild : jda.getGuilds()) {
             for (VoiceChannel vc : guild.getVoiceChannels()) {
                 List<Member> realMembers = vc.getMembers().stream()
@@ -1426,7 +1460,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     }
 
     private void awardVoiceXp() {
-        if (!levelsEnabled || !levelConfig.voiceXpEnabled) return;
+        if (!levelsEnabled) return;
         for (Guild guild : jda.getGuilds()) {
             for (VoiceChannel vc : guild.getVoiceChannels()) {
                 List<Member> realMembers = vc.getMembers().stream()
@@ -1450,7 +1484,9 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                             xpPerMinute *= levelConfig.voiceStreamMultiplier;
                         }
                         int minutes = levelConfig.voiceCheckInterval;
-                        addXp(uuid, (int) (xpPerMinute * minutes));
+                        if (levelConfig.voiceXpEnabled) {
+                            addXp(uuid, (int) (xpPerMinute * minutes));
+                        }
 
                         addQuestProgress(discordId, "voice", minutes);
                         if (member.getVoiceState() != null && member.getVoiceState().isStream()) {
@@ -1560,9 +1596,11 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 } catch (Exception e) { return "—"; }
             }
             case "_distance_m_": {
-                long cm = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_walk_one_cm%"));
-                if (cm >= 100000) return String.format("%.1f км", cm / 100000.0);
-                else return String.format("%.0f м", cm / 100.0);
+                long walk = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_walk_one_cm%"));
+                long sprint = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_sprint_one_cm%"));
+                long totalCm = walk + sprint;
+                if (totalCm >= 100000) return String.format("%.1f км", totalCm / 100000.0);
+                else return String.format("%.0f м", totalCm / 100.0);
             }
             case "_efficiency_": {
                 long mins = parseStatistic(PlaceholderAPI.setPlaceholders(player, "%statistic_play_one_minute%"));
@@ -1630,6 +1668,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             }
         }
     }
+}
 
     public OfflinePlayer findOfflinePlayer(String name) {
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
@@ -1654,7 +1693,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
             String name = p.getName();
             if (name == null) continue;
-            // Убрали фильтр startsWith("0"), чтобы бедрок-игроки участвовали в топах
             if (name.startsWith(".") || name.startsWith("*")) continue;
             OfflinePlayer existing = latestPlayers.get(name);
             if (existing == null || p.getLastSeen() > existing.getLastSeen()) {
@@ -1681,6 +1719,11 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             } else if (placeholder.equals("statistic_time_played")) {
                 numeric = parsePlaytimeToMinutes(rawValue);
                 formattedValues.put(name, formatCategoryValue(categoryKey, rawValue, numeric));
+            } else if (placeholder.equals("_distance_m_")) {
+                long walk = parseStatistic(PlaceholderAPI.setPlaceholders(p, "%statistic_walk_one_cm%"));
+                long sprint = parseStatistic(PlaceholderAPI.setPlaceholders(p, "%statistic_sprint_one_cm%"));
+                numeric = walk + sprint;
+                formattedValues.put(name, formatDistance(numeric));
             } else {
                 numeric = parseStatistic(rawValue);
                 formattedValues.put(name, formatCategoryValue(categoryKey, rawValue, numeric));
@@ -1728,8 +1771,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
     private String formatCategoryValue(String categoryKey, String rawValue, long numeric) {
         switch (categoryKey) {
             case "distance":
-                if (numeric >= 100000) return String.format("%.1f км", numeric / 100000.0);
-                else return String.format("%.0f м", numeric / 100.0);
+                return formatDistance(numeric);
             case "playtime":
                 return rawValue;
             case "level":
@@ -1737,6 +1779,11 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
             default:
                 return rawValue;
         }
+    }
+
+    private String formatDistance(long cm) {
+        if (cm >= 100000) return String.format("%.1f км", cm / 100000.0);
+        else return String.format("%.0f м", cm / 100.0);
     }
 
     private MessageEmbed buildTopEmbed(String categoryKey, int page) {
@@ -1791,11 +1838,15 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         @Override
         public void onMessageReceived(MessageReceivedEvent event) {
             if (event.getAuthor().isBot()) return;
+            if (!event.isFromGuild()) return;
             String content = event.getMessage().getContentRaw();
             String lower = content.toLowerCase();
 
             String userId = event.getAuthor().getId();
-            plugin.addQuestProgress(userId, "discord_chat", 1);
+            // discord_chat только из разрешённых каналов
+            if (plugin.levelConfig.textChannels.contains(event.getChannel().getId())) {
+                plugin.addQuestProgress(userId, "discord_chat", 1);
+            }
             if (content.contains("**") || content.contains("*") || content.contains("__") ||
                 content.contains("~~") || content.contains("||") || content.contains("```")) {
                 plugin.addQuestProgressByEvent(userId, "discord_formatted_message", 1);
@@ -1926,7 +1977,9 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 }
             }
 
-            sendProfileEmbed(event.getChannel().asGuildMessageChannel(), target);
+            if (event.isFromGuild()) {
+                sendProfileEmbed(event.getChannel().asGuildMessageChannel(), target);
+            }
         }
 
         private void sendProfileEmbed(GuildMessageChannel channel, OfflinePlayer player) {
