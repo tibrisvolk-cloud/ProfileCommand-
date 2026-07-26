@@ -918,7 +918,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         ItemStack item = event.getItem();
         if (item.getType() == Material.POTION || item.getType() == Material.LINGERING_POTION || item.getType() == Material.SPLASH_POTION) {
             PotionMeta meta = (PotionMeta) item.getItemMeta();
-            if (meta != null && (meta.hasCustomEffects() || meta.getBasePotionType() != PotionType.WATER)) {
+            if (meta != null && meta.getBasePotionType() != null && meta.getBasePotionType().getEffectType() != null) {
                 handleQuestEvent(event.getPlayer(), "player_drink_potion_with_effect", 1);
             }
         }
@@ -952,8 +952,10 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onQuestFirework(ProjectileLaunchEvent event) {
-        if (event.getEntity() instanceof Firework && event.getEntity().getShooter() instanceof Player player) {
-            handleQuestEvent(player, "player_firework_launch", 1);
+        if (event.getEntity().getType() == EntityType.FIREWORK_ROCKET) {
+            if (event.getEntity().getShooter() instanceof Player player) {
+                handleQuestEvent(player, "player_firework_launch", 1);
+            }
         }
     }
 
@@ -1692,7 +1694,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         for (OfflinePlayer p : Bukkit.getOfflinePlayers()) {
             String name = p.getName();
             if (name == null) continue;
-            // Убрали фильтр startsWith("0"), чтобы бедрок-игроки участвовали в топах
             if (name.startsWith(".") || name.startsWith("*")) continue;
             OfflinePlayer existing = latestPlayers.get(name);
             if (existing == null || p.getLastSeen() > existing.getLastSeen()) {
@@ -1838,19 +1839,29 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         @Override
         public void onMessageReceived(MessageReceivedEvent event) {
             if (event.getAuthor().isBot()) return;
-            if (!event.isFromGuild()) return;
             String content = event.getMessage().getContentRaw();
             String lower = content.toLowerCase();
 
             String userId = event.getAuthor().getId();
-            // discord_chat только из разрешённых каналов
-            if (plugin.levelConfig.textChannels.contains(event.getChannel().getId())) {
+
+            // Квест discord_chat только из разрешённых каналов (и только из гильдии)
+            if (event.isFromGuild() && plugin.levelConfig.textChannels.contains(event.getChannel().getId())) {
                 plugin.addQuestProgress(userId, "discord_chat", 1);
             }
-            if (content.contains("**") || content.contains("*") || content.contains("__") ||
-                content.contains("~~") || content.contains("||") || content.contains("```")) {
+            // Форматирование тоже только в гильдии
+            if (event.isFromGuild() && (content.contains("**") || content.contains("*") || content.contains("__") ||
+                    content.contains("~~") || content.contains("||") || content.contains("```"))) {
                 plugin.addQuestProgressByEvent(userId, "discord_formatted_message", 1);
             }
+
+            // Команда !link доступна и в ЛС, и в гильдии
+            if (lower.startsWith("!link ") && plugin.twoFactorEnabled) {
+                plugin.handleLinkCommand(event, content.substring(6).trim());
+                return;
+            }
+
+            // Остальные команды требуют гильдейский канал
+            if (!event.isFromGuild()) return;
 
             if (lower.equals("!quests")) {
                 String uid = event.getAuthor().getId();
@@ -1922,11 +1933,6 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                 return;
             }
 
-            if (lower.startsWith("!link ") && plugin.twoFactorEnabled) {
-                plugin.handleLinkCommand(event, content.substring(6).trim());
-                return;
-            }
-
             if (lower.equals("!me")) {
                 showProfile(event, null, true);
                 return;
@@ -1985,7 +1991,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
         private void sendProfileEmbed(GuildMessageChannel channel, OfflinePlayer player) {
             EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
             String playerName = player.getName() != null ? player.getName() : "Unknown";
-            String avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + playerName + "/128";
+            String avatarUrl = "https://minotar.net/avatar/" + playerName + "/128";
             embed.setAuthor(playerName, null, avatarUrl);
             embed.setThumbnail(avatarUrl);
             for (Map<?, ?> fieldMap : plugin.profileFields) {
@@ -2068,7 +2074,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                     } else {
                         EmbedBuilder embed = new EmbedBuilder().setColor(new Color(0x5865F2));
                         String pName = target.getName() != null ? target.getName() : "Unknown";
-                        String avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + pName + "/128";
+                        String avatarUrl = "https://minotar.net/avatar/" + pName + "/128";
                         embed.setAuthor(pName, null, avatarUrl);
                         embed.setThumbnail(avatarUrl);
                         for (Map<?, ?> fieldMap : plugin.profileFields) {
@@ -2104,7 +2110,7 @@ public class IndepProfileBot extends JavaPlugin implements Listener {
                         } else {
                             EmbedBuilder selfEmbed = new EmbedBuilder().setColor(new Color(0x5865F2));
                             String pName = self.getName() != null ? self.getName() : "Unknown";
-                            String avatarUrl = "[https://minotar.net/avatar/](https://minotar.net/avatar/)" + pName + "/128";
+                            String avatarUrl = "https://minotar.net/avatar/" + pName + "/128";
                             selfEmbed.setAuthor(pName, null, avatarUrl);
                             selfEmbed.setThumbnail(avatarUrl);
                             for (Map<?, ?> fieldMap : plugin.profileFields) {
